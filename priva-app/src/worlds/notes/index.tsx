@@ -182,14 +182,21 @@ function NoteEditor({ note, onUpdate, onSetReminder, onAddReminder, onDelete }: 
 
   const analysis = note.analysis;
   const buyIntents = analysis?.buy_intents ?? [];
+  const offerState = analysis?.offer_state;
 
   return (
     <div className="flex-1 overflow-y-auto min-h-0">
       <div className="max-w-2xl mx-auto px-8 py-6">
         <div className="flex items-center gap-2 mb-1">
-          {buyIntents.length > 0 && (
+          {buyIntents.length > 0 && offerState && offerState !== "not_shopping" && (
             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-accent/10 border border-accent/30 text-[10px] text-accent">
-              <ShoppingBag size={10} /> shopping — texted you on iMessage
+              <ShoppingBag size={10} /> shopping — {offerState === "already_purchased"
+                ? "already purchased"
+                : offerState === "already_offered"
+                  ? "already offered"
+                  : offerState === "cooldown"
+                    ? "offer paused"
+                    : "texted you on iMessage"}
             </span>
           )}
           {analysis?.category && analysis.category !== "general" && (
@@ -256,7 +263,6 @@ const AGENT_COLORS: Record<string, string> = {
 };
 
 const AGENT_ACTIONS: Record<string, string> = {
-  "NOTE ANALYZER": "Shopping Intent Detected",
   LINQ: "Messaging You",
   SERPAPI: "Searching Products",
   RANKER: "Ranking Results",
@@ -268,6 +274,22 @@ const AGENT_ACTIONS: Record<string, string> = {
   "PRICE WATCH": "Price Drop Alert",
   NOTES: "Note Saved",
 };
+
+// NOTE ANALYZER events carry different meanings; label by message so we never
+// claim "Shopping Intent Detected" before an intent is actually confirmed.
+function noteAnalyzerLabel(message: string): string {
+  const m = message.toLowerCase();
+  if (m.includes("saw buy intent")) return "Shopping Intent Detected";
+  if (m.includes("already purchased")) return "Already Purchased";
+  if (m.includes("cooldown") || m.includes("already offered")) return "Offer Paused";
+  if (m.includes("scheduled") || m.includes("urgent")) return "Analyzing Note";
+  return "Analyzing Note";
+}
+
+function agentAction(agent: string, message: string): string {
+  if (agent === "NOTE ANALYZER") return noteAnalyzerLabel(message);
+  return AGENT_ACTIONS[agent] ?? agent;
+}
 
 const TRACE_STAGES = [
   { label: "Intent", agents: ["NOTE ANALYZER", "LINQ", "NOTES"] },
@@ -331,7 +353,7 @@ function NoteTracePanel({ noteId }: { noteId: string | null }) {
           </p>
         )}
         {events.map((e, i) => {
-          const action = AGENT_ACTIONS[e.agent] ?? e.agent;
+          const action = agentAction(e.agent, e.message || "");
           return (
             <div key={i} className="flex items-start gap-2">
               <div className="flex flex-col items-center mt-1">
@@ -367,9 +389,19 @@ export function NotesWorld() {
   const [doneTodos, setDoneTodos] = useState<Set<string>>(new Set());
   const [reminders, setReminders] = useState<ReminderResult[]>([]);
   const syncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const persistTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const notesRef = useRef<StoredNote[]>(notes);
+  notesRef.current = notes;
+
+  // Debounced localStorage persist: typing only updates React state; the
+  // (potentially large) JSON stringify + write happens once, after a pause.
+  const persistNotes = useCallback((next: StoredNote[]) => {
+    if (persistTimer.current) clearTimeout(persistTimer.current);
+    persistTimer.current = setTimeout(() => saveNotes(next), 800);
+  }, []);
 
   const pushToBackend = useCallback((next: StoredNote[], changed?: StoredNote) => {
-    saveNotes(next);
+    persistNotes(next);
     if (syncTimer.current) clearTimeout(syncTimer.current);
     if (!changed) return;
     const originUser = api.getCurrentUser()?.user_id || "local";
@@ -399,10 +431,12 @@ export function NotesWorld() {
         })
         .catch(() => {});
     }, 2000);
-  }, []);
+  }, [persistNotes]);
 
   useEffect(() => () => {
     if (syncTimer.current) clearTimeout(syncTimer.current);
+    if (persistTimer.current) clearTimeout(persistTimer.current);
+    saveNotes(notesRef.current);
   }, []);
 
   useEffect(() => {

@@ -166,6 +166,7 @@ export interface NoteAnalysis {
   reminders: { text: string; due_at: number; parsed_from: string }[];
   category: string;
   summary: string;
+  offer_state?: "sent" | "already_purchased" | "already_offered" | "cooldown" | "not_shopping";
 }
 
 export interface ReminderResult {

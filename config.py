@@ -30,6 +30,10 @@ NOTE_LLM = os.getenv("NOTE_LLM", "")
 # api.openai.com, otherwise coda-purchase-advisor / coda-note-analyzer).
 LLM_MODEL = os.getenv("LLM_MODEL", "")
 DEMO_MODE = os.getenv("DEMO_MODE", "0") == "1"
+# When 1, payments auto-complete ~5s after the session is created (choreographed
+# judge demo: no card/passkey needed). When 0 (default), PRIVA waits on the real
+# Prava sandbox — the user must complete the payment in the iframe/link.
+SIMULATE_PAYMENT = os.getenv("SIMULATE_PAYMENT", "0") == "1"
 
 # Real-world pacing by default, demo pacing when DEMO_MODE=1.
 # NOTE_OFFER_DELAY: how long after the user STOPS editing a note before PRIVA

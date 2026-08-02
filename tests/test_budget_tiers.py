@@ -9,11 +9,13 @@ import pytest
 from fastapi.testclient import TestClient
 
 import spending
+import users
 
 
 @pytest.fixture(autouse=True)
 def isolated_store(tmp_path, monkeypatch):
     monkeypatch.setattr(spending, "BUDGET_FILE", str(tmp_path / "spending.json"))
+    monkeypatch.setattr(users, "USERS_FILE", str(tmp_path / "users.json"))
     yield
     monkeypatch.delattr(spending, "BUDGET_FILE", raising=False)
 
@@ -88,12 +90,21 @@ def test_analysis_exposes_borrow_fields():
 
 # ---------- API gates ----------
 
+def _authed(client, phone):
+    otp = client.post("/api/auth/otp", json={"phone": phone, "name": "Budg"}).json().get("otp", "")
+    body = client.post("/api/auth/verify", json={"phone": phone, "otp": otp}).json()
+    assert body.get("token"), body
+    return {"Authorization": f"Bearer {body['token']}"}, body
+
+
 def test_api_pay_409_on_unapproved_exceed(monkeypatch, tmp_path):
     monkeypatch.setattr(spending, "BUDGET_FILE", str(tmp_path / "spending.json"))
-    spending.set_budget(50)
-    spending.record_purchase("a", "m", 45.0)
-
     import server as srv
+    client = TestClient(srv.app)
+    headers, body = _authed(client, "+19170000009")
+    spending.set_budget(50, body["user_id"])
+    spending.record_purchase("a", "m", 45.0, user_id=body["user_id"])
+
     calls = []
 
     async def fake_create(**kwargs):
@@ -101,10 +112,9 @@ def test_api_pay_409_on_unapproved_exceed(monkeypatch, tmp_path):
         return {"session_id": "sess1", "result": "ok"}
 
     monkeypatch.setattr(srv, "create_payment_session", fake_create)
-    client = TestClient(srv.app)
     r = client.post("/api/pay", json={
         "product_id": "p1", "title": "headphones", "price": 20.0, "merchant": "sony",
-    })
+    }, headers=headers)
     assert r.status_code == 409
     detail = r.json()["detail"]
     assert "exceeds" in detail and "excess" in detail
@@ -113,10 +123,12 @@ def test_api_pay_409_on_unapproved_exceed(monkeypatch, tmp_path):
 
 def test_api_pay_approved_excess_proceeds(monkeypatch, tmp_path):
     monkeypatch.setattr(spending, "BUDGET_FILE", str(tmp_path / "spending.json"))
-    spending.set_budget(50)
-    spending.record_purchase("a", "m", 45.0)
-
     import server as srv
+    client = TestClient(srv.app)
+    headers, body = _authed(client, "+19170000010")
+    spending.set_budget(50, body["user_id"])
+    spending.record_purchase("a", "m", 45.0, user_id=body["user_id"])
+
     calls = []
 
     async def fake_create(**kwargs):
@@ -125,14 +137,14 @@ def test_api_pay_approved_excess_proceeds(monkeypatch, tmp_path):
 
     monkeypatch.setattr(srv, "create_payment_session", fake_create)
     monkeypatch.setattr(srv, "log_transaction", lambda *a, **k: type("T", (), {"id": "txn1"})())
-    client = TestClient(srv.app)
     r = client.post("/api/pay", json={
         "product_id": "p1", "title": "headphones", "price": 20.0, "merchant": "sony",
         "budget_excess": 15.0,
-    })
+    }, headers=headers)
     assert r.status_code == 200
     assert r.json()["budget_tier"] == "exceeds"
     assert len(calls) == 1
+    assert calls[0]["user_id"] == body["user_id"]  # identity forced server-side
 
 
 def test_api_pay_complete_records_purchase_and_borrow(monkeypatch, tmp_path):
@@ -143,16 +155,26 @@ def test_api_pay_complete_records_purchase_and_borrow(monkeypatch, tmp_path):
         return {"status": "completed", "prava_status": "approved"}
     monkeypatch.setattr(srv, "complete_payment", fake_complete)
     monkeypatch.setattr(srv, "update_transaction", lambda *a, **k: None)
-    monkeypatch.setattr(srv, "get_transactions", lambda: [{
-        "id": "txn1", "product_title": "headphones", "merchant": "sony", "amount": 20.0,
-    }])
     client = TestClient(srv.app)
+    headers, body = _authed(client, "+19170000011")
+    monkeypatch.setattr(srv, "get_transactions", lambda: [{
+        "id": "txn1", "user_id": body["user_id"], "product_title": "headphones",
+        "merchant": "sony", "amount": 20.0,
+    }])
     r = client.post("/api/pay/complete", json={
         "session_id": "sess1", "transaction_id": "txn1", "amount": 20.0, "budget_excess": 15.0,
-    })
+    }, headers=headers)
     assert r.status_code == 200
-    assert spending.spent_this_month() == 20.0
-    assert spending.borrowed_into_next() == 15.0
+    assert spending.spent_this_month(user_id=body["user_id"]) == 20.0
+    assert spending.borrowed_into_next(user_id=body["user_id"]) == 15.0
+
+
+def test_api_pay_requires_login():
+    client = TestClient(__import__("server").app)
+    r = client.post("/api/pay", json={
+        "product_id": "p1", "title": "x", "price": 1.0, "merchant": "m",
+    })
+    assert r.status_code == 401
 
 
 # ---------- SMS consent tiers (send_consent) ----------
@@ -249,3 +271,50 @@ def test_handle_choice_no_cancels_and_watches(monkeypatch, tmp_path):
     asyncio.run(srv.handle_choice("+15550001111", "NO", "thr2"))
     assert watched == [("headphones", 20.0, "")]
     assert any("cancelled" in m.lower() for m in messages)
+
+# ---------- payment simulation flag (real sandbox vs choreographed demo) ----------
+
+def test_complete_payment_real_mode_does_not_auto_complete(monkeypatch):
+    """With SIMULATE_PAYMENT=0, complete_payment must NOT return completed for a
+    fresh session — it waits on the real Prava sandbox instead."""
+    import prava_client as pc
+    monkeypatch.setattr(pc, "SIMULATE_PAYMENT", False)
+    monkeypatch.setattr(pc, "_configured", lambda: False)
+    # Not configured + no session -> must fail/unknown, never auto-complete.
+    import asyncio
+    r = asyncio.run(pc.complete_payment(""))
+    assert r.get("status") != "completed"
+    s = asyncio.run(pc.get_payment_status(""))
+    assert s.get("status") in ("unknown", "failed")
+
+
+def test_get_payment_status_real_mode_queries_sdk(monkeypatch):
+    """With SIMULATE_PAYMENT=0, get_payment_status must call the real SDK, not
+    return the simulated awaiting_result stub."""
+    import prava_client as pc
+    monkeypatch.setattr(pc, "SIMULATE_PAYMENT", False)
+    monkeypatch.setattr(pc, "_configured", lambda: True)
+    import asyncio
+
+    class FakeResult:
+        def model_dump(self, **kw):
+            return {"status": "pending", "session_id": "s1", "transactions": []}
+    calls = []
+
+    class FakeSessions:
+        async def get_payment_result(self, sid):
+            calls.append(sid)
+            return FakeResult()
+
+    class FakeClient:
+        def __init__(self, *a, **k):
+            self.sessions = FakeSessions()
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *a):
+            return False
+
+    monkeypatch.setattr(pc, "AsyncPravaClient", FakeClient)
+    s = asyncio.run(pc.get_payment_status("sess-abc"))
+    assert calls == ["sess-abc"]
+    assert s.get("status") == "pending"
