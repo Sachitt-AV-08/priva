@@ -57,7 +57,7 @@ export default function LandingPage() {
           <p className="hero-sub">Write naturally. Discover intelligently. Purchase confidently.</p>
           <div className="hero-actions">
             <Link className="btn btn-primary btn-lg" href="/login">Try the live demo</Link>
-            <a className="btn btn-ghost btn-lg" href={DOWNLOAD_URL}>Install PRIVA v1.0.0</a>
+            <a className="btn btn-ghost btn-lg" href={DOWNLOAD_URL}>Install PRIVA v1.1.1</a>
             <Link className="hero-open-link" href="/app">Open app <ArrowRight size={13} aria-hidden="true" /></Link>
           </div>
         </div>
