@@ -6,7 +6,7 @@ import json
 
 import httpx
 
-from config import NOTE_LLM, OPENAI_API_KEY
+from config import NOTE_LLM, OPENAI_API_KEY, LLM_MODEL
 from preferences import normalize_purpose
 
 
@@ -29,7 +29,9 @@ async def _llm_json(system: str, user: str, timeout: float = 12.0) -> dict | Non
     if not _available():
         return None
     base_url = (NOTE_LLM or "https://api.openai.com").rstrip("/")
-    models = ["gpt-4o-mini", "gpt-4o"] if "api.openai.com" in base_url else ["coda-purchase-advisor"]
+    models = [LLM_MODEL] if LLM_MODEL else (
+        ["gpt-4o-mini", "gpt-4o"] if "api.openai.com" in base_url else ["coda-purchase-advisor"]
+    )
     key = (base_url, system, user)
     if key in _CACHE:
         return _CACHE[key]

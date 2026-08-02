@@ -235,11 +235,11 @@ def analyze_note(note: dict) -> dict:
 
 async def analyze_note_llm(note: dict) -> dict:
     """Enhanced analysis via NOTE_LLM (OpenAI-compatible) or OpenAI directly. Falls back to rules."""
-    from config import OPENAI_API_KEY
+    from config import OPENAI_API_KEY, LLM_MODEL
     base_url = (NOTE_LLM or "https://api.openai.com").rstrip("/")
     if not NOTE_LLM and not OPENAI_API_KEY:
         return analyze_note(note)
-    model = "gpt-4o-mini" if "api.openai.com" in base_url else "coda-note-analyzer"
+    model = LLM_MODEL or ("gpt-4o-mini" if "api.openai.com" in base_url else "coda-note-analyzer")
     headers = {"Authorization": f"Bearer {OPENAI_API_KEY}"} if OPENAI_API_KEY else {}
     try:
         payload = {

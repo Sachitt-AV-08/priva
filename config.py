@@ -26,6 +26,9 @@ PRIVA_SERVER_PORT = int(os.getenv("PRIVA_SERVER_PORT", "8766"))
 PRIVA_WEBHOOK_URL = os.getenv("PRIVA_WEBHOOK_URL", "")
 
 NOTE_LLM = os.getenv("NOTE_LLM", "")
+# Model served by NOTE_LLM / OPENAI_API_KEY. Empty = auto (gpt-4o-mini/gpt-4o on
+# api.openai.com, otherwise coda-purchase-advisor / coda-note-analyzer).
+LLM_MODEL = os.getenv("LLM_MODEL", "")
 DEMO_MODE = os.getenv("DEMO_MODE", "0") == "1"
 
 # Real-world pacing by default, demo pacing when DEMO_MODE=1.
