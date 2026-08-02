@@ -4,7 +4,7 @@ export const PRIVA_API =
   process.env.NEXT_PUBLIC_PRIVA_API || "https://mollusk-anytime-handcraft.ngrok-free.dev";
 
 export const DOWNLOAD_URL =
-  "https://github.com/Sachitt-AV-08/priva/releases/latest/download/PRIVA-Setup-1.0.0.exe";
+  "https://github.com/Sachitt-AV-08/priva/releases/latest/download/PRIVA-Setup-1.1.0.exe";
 
 export const WEB_APP_URL = "https://sachitt-av-08.github.io/priva/";
 
