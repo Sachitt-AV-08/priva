@@ -1,0 +1,31 @@
+# secrets — never commit
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+
+# runtime state (generated locally)
+priva/transcript.json
+priva/transcript.json.bak
+priva/notes.json
+priva/note_offers.json
+priva/reminders.json
+priva/spending.json
+priva/transactions.json
+priva/watchlist.json
+priva/link_cache.json
+priva/search_cache.json
+
+# python
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# node / build
+priva-app/node_modules/
+priva-app/dist/
+priva-app/dist-electron/
+priva-app/.vite/
+priva-app/release/
+priva-app/*.exe

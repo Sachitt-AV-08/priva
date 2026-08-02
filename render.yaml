@@ -1,0 +1,30 @@
+services:
+  - type: web
+    name: priva
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python server.py
+    envVars:
+      - key: DEMO_MODE
+        value: "1"
+      - key: PRIVA_SERVER_HOST
+        value: "0.0.0.0"
+      - key: LINQ_API_KEY
+        sync: false
+      - key: LINQ_SANDBOX_NUMBER
+        sync: false
+      - key: LINQ_WEBHOOK_SECRET
+        sync: false
+      - key: LINQ_USER_ADDRESS
+        sync: false
+      - key: PRAVA_SECRET_KEY
+        sync: false
+      - key: PRAVA_PUBLISHABLE_KEY
+        sync: false
+      - key: SERPAPI_KEY
+        sync: false
+      - key: NOTE_LLM
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false

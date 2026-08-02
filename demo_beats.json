@@ -1,0 +1,60 @@
+{
+  "beats": [
+    {
+      "id": "beat_1_note",
+      "trigger": "F9",
+      "title": "The note",
+      "action": "Type note in Notes world: 'need to buy a mechanical keyboard under $120'",
+      "on_screen": "Phone buzzes: PRIVA offers to find best options"
+    },
+    {
+      "id": "beat_2_search",
+      "trigger": "F9",
+      "title": "The search",
+      "action": "In-app mirror: reply YES",
+      "on_screen": "Agent trace: NOTE ANALYZER -> SERPAPI -> RANKER; options text with best pick + savings %"
+    },
+    {
+      "id": "beat_3_pick",
+      "trigger": "F9",
+      "title": "The pick",
+      "action": "Reply 3 (pick a mid option)",
+      "on_screen": "Consent text with product + price"
+    },
+    {
+      "id": "beat_4_pay",
+      "trigger": "F9",
+      "title": "The purchase",
+      "action": "Reply YES -> tap-to-pay link (test card 4622 9431 2313 7789 / 757 / 12/27, OTP 456789)",
+      "on_screen": "Agent trace: PRAVA session live -> PAID; confirmation + ETA; order in Commerce"
+    },
+    {
+      "id": "beat_5_delivery",
+      "trigger": "F9",
+      "title": "The delivery arc",
+      "action": "Advance shipping timeline (confirmed -> shipped -> out for delivery)",
+      "on_screen": "Delivery timeline updates in Commerce order card; TRACK keyword works"
+    },
+    {
+      "id": "beat_6_surprise",
+      "trigger": "F9",
+      "title": "THE SURPRISE BEAT (mid-talk)",
+      "action": "POST /api/demo/price-drop {item: keyboard, drop_pct: 12} — phone buzzes while presenter talks",
+      "on_screen": "Phone: 'keyboard dropped 12% - reply BUY NOW'. Presenter ignores it. Agent keeps working."
+    },
+    {
+      "id": "beat_7_buy_now",
+      "trigger": "F9",
+      "title": "Instant checkout",
+      "action": "In-app mirror: BUY NOW -> YES",
+      "on_screen": "Straight to payment (no option picking) - proves the agent remembered the item"
+    },
+    {
+      "id": "beat_8_decline",
+      "trigger": "F9",
+      "title": "Persistence loop (bonus)",
+      "action": "Optional: decline an offer (NO), show follow-up reminder scheduled",
+      "on_screen": "Reminder chip appears; reminder list shows 'Still want to buy...'"
+    }
+  ]
+}

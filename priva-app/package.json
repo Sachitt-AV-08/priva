@@ -1,0 +1,60 @@
+{
+  "name": "priva",
+  "version": "1.0.0",
+  "description": "PRIVA — Personal Retail Intelligence via Agent. iMessage-native AI assistant for shopping + productivity.",
+  "author": "A V Sachitt",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Sachitt-AV-08/AUDIT.git"
+  },
+  "keywords": [
+    "priva",
+    "shopping",
+    "productivity",
+    "electron",
+    "react",
+    "typescript"
+  ],
+  "main": "dist-electron/main.js",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "electron:dev": "vite",
+    "electron:build": "vite build",
+    "package": "electron-builder --win portable --config electron-builder.yml"
+  },
+  "dependencies": {
+    "@dnd-kit/core": "^6.1.0",
+    "@dnd-kit/sortable": "^8.0.0",
+    "@dnd-kit/utilities": "^3.2.2",
+    "@prava-sdk/core": "^0.1.2",
+    "@tanstack/react-table": "^8.20.0",
+    "@xyflow/react": "^12.0.0",
+    "fractional-indexing": "^3.2.0",
+    "framer-motion": "^11.0.0",
+    "lucide-react": "^0.400.0",
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0",
+    "sql.js": "^1.10.0",
+    "zustand": "^4.5.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/react": "^18.3.0",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.0",
+    "autoprefixer": "^10.4.0",
+    "concurrently": "^8.2.0",
+    "electron": "^28.0.0",
+    "electron-builder": "^24.0.0",
+    "postcss": "^8.4.0",
+    "tailwindcss": "^3.4.0",
+    "typescript": "^5.5.0",
+    "vite": "^5.4.0",
+    "vite-plugin-electron": "^1.1.0",
+    "vite-plugin-electron-renderer": "^1.0.0",
+    "wait-on": "^7.2.0"
+  }
+}

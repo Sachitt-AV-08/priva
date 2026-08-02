@@ -1,0 +1,39 @@
+
+> priva@1.0.0 dev
+> vite
+
+[33mThe CJS build of Vite's Node API is deprecated. See https://vite.dev/guide/troubleshooting.html#vite-cjs-node-api-deprecated for more details.[39m
+[vite] Electron plugin loaded
+[36mvite v5.4.21 [32mbuilding for development...[36m[39m
+[36m
+watching for file changes...[39m
+Unknown input options: platform. Allowed options: cache, context, experimentalCacheExpiry, experimentalLogSideEffects, external, fs, input, jsx, logLevel, makeAbsoluteExternalsRelative, maxParallelFileOps, moduleContext, onLog, onwarn, perf, plugins, preserveEntrySignatures, preserveSymlinks, shimMissingExports, strictDeprecations, treeshake, watch
+[36mvite v5.4.21 [32mbuilding for development...[36m[39m
+[36m
+watching for file changes...[39m
+Unknown input options: platform. Allowed options: cache, context, experimentalCacheExpiry, experimentalLogSideEffects, external, fs, input, jsx, logLevel, makeAbsoluteExternalsRelative, maxParallelFileOps, moduleContext, onLog, onwarn, perf, plugins, preserveEntrySignatures, preserveSymlinks, shimMissingExports, strictDeprecations, treeshake, watch
+[36m
+build started...[39m
+[36m
+build started...[39m
+
+  [32m[1mVITE[22m v5.4.21[39m  [2mready in [0m[1m496[22m[2m[0m ms[22m
+
+  [32m➜[39m  [1mLocal[22m:   [36mhttp://localhost:[1m5173[22m/[39m
+[2m  [32m➜[39m  [1mNetwork[22m[2m: use [22m[1m--host[22m[2m to expose[22m
+[2m[32m  ➜[39m[22m[2m  press [22m[1mh + enter[22m[2m to show help[22m
+transforming...
+transforming...
+[32m✓[39m 1 modules transformed.
+[32m✓[39m 1 modules transformed.
+rendering chunks...
+rendering chunks...
+computing gzip size...
+computing gzip size...
+[2mdist-electron/[22m[36mmain.js  [39m[1m[2m9.01 kB[22m[1m[22m[2m │ gzip: 2.71 kB[22m
+[36mbuilt in 373ms.[39m
+[2mdist-electron/[22m[36mpreload.js  [39m[1m[2m1.13 kB[22m[1m[22m[2m │ gzip: 0.38 kB[22m
+[36mbuilt in 374ms.[39m
+
+[2m6:25:57 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/styles/global.css, /src/components/CommandPalette.tsx, /src/worlds/purchase-graph/index.tsx, /src/worlds/notes/index.tsx, /src/worlds/commerce/index.tsx[22m
+^C

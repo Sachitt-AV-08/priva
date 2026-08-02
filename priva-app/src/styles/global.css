@@ -1,0 +1,162 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --canvas: #08090a;
+    --surface-1: #0f1113;
+    --surface-2: #181a1e;
+    --surface-3: #1f2126;
+    --surface-4: #282a30;
+    --surface-5: #32343c;
+    --accent: #8b5cf6;
+    --accent-hover: #7c3aed;
+    --accent-dim: #6d28d9;
+    --accent-bright: #a78bfa;
+    --accent-green: #22c55e;
+    --accent-orange: #f59e0b;
+    --accent-red: #ef4444;
+    --accent-pink: #ec4899;
+    --accent-cyan: #06b6d4;
+    --text-primary: #f0f0f0;
+    --text-secondary: #8b8d97;
+    --text-muted: #55575f;
+    --border: rgba(255, 255, 255, 0.06);
+    --border-active: rgba(255, 255, 255, 0.12);
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--surface-4) transparent;
+  }
+
+  *::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  *::-webkit-scrollbar-thumb {
+    background: var(--surface-4);
+    border-radius: 3px;
+  }
+
+  *::-webkit-scrollbar-thumb:hover {
+    background: var(--surface-5);
+  }
+
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  ::selection {
+    background: rgba(139, 92, 246, 0.3);
+  }
+
+  input::placeholder,
+  textarea::placeholder {
+    color: var(--text-muted);
+    opacity: 0.5;
+  }
+
+  input:focus,
+  textarea:focus {
+    outline: none;
+  }
+
+  [draggable="true"] {
+    -webkit-user-drag: element;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply px-3 py-1.5 text-xs font-medium rounded-lg transition-all duration-150
+           bg-accent text-white hover:bg-accent-hover active:bg-accent-dim;
+  }
+
+  .btn-secondary {
+    @apply px-3 py-1.5 text-xs font-medium rounded-lg transition-all duration-150
+           bg-surface-3 text-text-secondary hover:bg-surface-4 hover:text-text-primary
+           border border-border;
+  }
+
+  .btn-ghost {
+    @apply px-3 py-1.5 text-xs font-medium rounded-lg transition-all duration-150
+           text-text-secondary hover:bg-surface-3 hover:text-text-primary;
+  }
+
+  .btn-danger {
+    @apply px-3 py-1.5 text-xs font-medium rounded-lg transition-all duration-150
+           bg-red-950/40 text-red-400 hover:bg-red-900/50 border border-red-900/40;
+  }
+
+  .input-field {
+    @apply w-full px-3 py-2 text-sm bg-surface-1 border border-border rounded-lg
+           text-text-primary placeholder-text-muted outline-none
+           focus:border-accent/50 focus:ring-1 focus:ring-accent/20 transition-all duration-150;
+  }
+
+  .card {
+    @apply bg-surface-2 border border-border rounded-xl shadow-subtle;
+  }
+
+  .glass {
+    @apply bg-surface-1/80 backdrop-blur-xl border border-border/50;
+  }
+
+  .glass-strong {
+    @apply bg-surface-1/90 backdrop-blur-2xl border border-border/50 shadow-elevated;
+  }
+}
+
+@layer utilities {
+  .animate-fade-in {
+    animation: fadeIn 0.15s ease-out;
+  }
+  .animate-slide-up {
+    animation: slideUp 0.2s ease-out;
+  }
+  .animate-slide-in-right {
+    animation: slideInRight 0.2s ease-out;
+  }
+  .animate-slide-down {
+    animation: slideDown 0.2s ease-out;
+  }
+  .animate-scale-in {
+    animation: scaleIn 0.15s ease-out;
+  }
+  .text-gradient {
+    @apply bg-clip-text text-transparent bg-gradient-to-r from-accent to-accent-bright;
+  }
+
+  .shimmer {
+    background: linear-gradient(90deg,
+      var(--surface-3) 0%,
+      var(--surface-4) 40%,
+      var(--surface-3) 80%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 1.8s ease-in-out infinite;
+  }
+
+  @keyframes shimmer {
+    0% { background-position: -200% 0; }
+    100% { background-position: 200% 0; }
+  }
+
+  .macos-dot {
+    @apply w-3 h-3 rounded-full transition-all duration-100;
+  }
+  .macos-dot:hover {
+    filter: brightness(1.3);
+  }
+}
