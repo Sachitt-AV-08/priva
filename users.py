@@ -18,6 +18,10 @@ USERS_FILE = os.path.join(os.path.dirname(__file__), "users.json")
 
 OTP_TTL = 600          # seconds an OTP stays valid
 TOKEN_TTL = 7 * 86400  # seconds a bearer token stays valid
+OTP_MAX_ATTEMPTS = 5   # wrong guesses before the code is invalidated
+OTP_RATE_WINDOW = 300  # seconds
+OTP_RATE_MAX = 3       # max OTP requests per window per phone
+LAST_ACTIVE_WRITE_EVERY = 120  # write-amplification guard for token checks
 
 
 def _load() -> list:
@@ -77,16 +81,37 @@ def get_or_create(phone: str, name: str = "") -> dict:
 
 
 def issue_otp(phone: str, name: str = "") -> dict:
-    """Set a fresh 6-digit OTP for the user (creates the user if new)."""
+    """Set a fresh 6-digit OTP for the user (creates the user if new).
+
+    Rate-limited to OTP_RATE_MAX requests per OTP_RATE_WINDOW per phone; the
+    returned dict carries rate_limited/retry_after when throttled.
+    """
     user = get_or_create(phone, name)
     users = _load()
+    now = int(time.time())
     for u in users:
-        if u["user_id"] == user["user_id"]:
-            u["otp"] = f"{random.randint(0, 999999):06d}"
-            u["otp_expiry"] = int(time.time()) + OTP_TTL
-            break
+        if u["user_id"] != user["user_id"]:
+            continue
+        reqs = [t for t in (u.get("otp_reqs") or []) if t > now - OTP_RATE_WINDOW]
+        if len(reqs) >= OTP_RATE_MAX:
+            retry = OTP_RATE_WINDOW - (now - reqs[0])
+            return {"rate_limited": True, "retry_after": max(retry, 1), **user}
+        reqs.append(now)
+        u["otp_reqs"] = reqs
+        u["otp"] = f"{random.randint(0, 999999):06d}"
+        u["otp_expiry"] = now + OTP_TTL
+        u["otp_attempts"] = 0
+        break
     _save(users)
     return user_by_id(user["user_id"])
+
+
+def otp_attempts_remaining(phone: str) -> int:
+    """How many wrong OTP guesses are left before the code is invalidated."""
+    user = user_by_phone(phone)
+    if not user or not user.get("otp"):
+        return 0
+    return max(OTP_MAX_ATTEMPTS - int(user.get("otp_attempts", 0)), 0)
 
 
 def mint_token(user_id: str) -> dict | None:
@@ -97,10 +122,37 @@ def mint_token(user_id: str) -> dict | None:
             continue
         u["token"] = secrets.token_hex(24)
         u["token_expiry"] = int(time.time()) + TOKEN_TTL
+        u["otp"] = ""
+        u["otp_expiry"] = 0
+        u["otp_attempts"] = 0
         u["last_active"] = int(time.time())
         _save(users)
         return u
     return None
+
+
+def record_wrong_otp(phone: str) -> bool:
+    """Increment the wrong-guess counter; invalidates the code at the cap.
+
+    Returns True when the OTP has just been invalidated (client should ask
+    the user to request a fresh code).
+    """
+    phone = normalize_phone(phone)
+    users = _load()
+    for u in users:
+        if u.get("phone") != phone or not u.get("otp"):
+            continue
+        attempts = int(u.get("otp_attempts", 0)) + 1
+        if attempts >= OTP_MAX_ATTEMPTS:
+            u["otp"] = ""
+            u["otp_expiry"] = 0
+            u["otp_attempts"] = 0
+            _save(users)
+            return True
+        u["otp_attempts"] = attempts
+        _save(users)
+        return False
+    return False
 
 
 def verify_otp(phone: str, otp: str) -> dict | None:
@@ -116,6 +168,7 @@ def verify_otp(phone: str, otp: str) -> dict | None:
             return None
         u["otp"] = ""
         u["otp_expiry"] = 0
+        u["otp_attempts"] = 0
         u["token"] = secrets.token_hex(24)
         u["token_expiry"] = int(time.time()) + TOKEN_TTL
         u["last_active"] = int(time.time())
@@ -132,8 +185,10 @@ def user_by_token(token: str) -> dict | None:
         if u.get("token") == token:
             if int(time.time()) > int(u.get("token_expiry", 0)):
                 continue
-            u["last_active"] = int(time.time())
-            _save(users)
+            last = int(u.get("last_active", 0))
+            if int(time.time()) - last >= LAST_ACTIVE_WRITE_EVERY:
+                u["last_active"] = int(time.time())
+                _save(users)
             return u
     return None
 

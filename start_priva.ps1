@@ -1,4 +1,4 @@
-# PRIVA — one-command launch: backend + ngrok tunnel (webhook self-register) + Electron app
+﻿# PRIVA — one-command launch: backend + ngrok tunnel (webhook self-register) + Electron app
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repo = Split-Path -Parent $root
@@ -14,9 +14,9 @@ function Test-Health {
     try { return (Invoke-RestMethod -Uri "http://localhost:$port/health" -TimeoutSec 3).status -eq "ok" } catch { return $false }
 }
 if (Test-Health) {
-    Write-Host "[1/3] backend already running on :$port"
+    Write-Host "[1/4] backend already running on :$port"
 } else {
-    Write-Host "[1/3] starting backend on :$port ..."
+    Write-Host "[1/4] starting backend on :$port ..."
     Start-Process -FilePath "python" -ArgumentList "server.py" -WorkingDirectory $backendDir -WindowStyle Hidden
     for ($i = 0; $i -lt 30; $i++) {
         Start-Sleep -Seconds 1
@@ -37,9 +37,9 @@ function Get-TunnelUrl {
 }
 $tunnel = Get-TunnelUrl
 if ($tunnel) {
-    Write-Host "[2/3] tunnel already up: $tunnel"
+    Write-Host "[2/4] tunnel already up: $tunnel"
 } else {
-    Write-Host "[2/3] starting ngrok tunnel ..."
+    Write-Host "[2/4] starting ngrok tunnel ..."
     Start-Process -FilePath "ngrok" -ArgumentList "http $port" -WindowStyle Hidden
     for ($i = 0; $i -lt 30; $i++) {
         Start-Sleep -Seconds 1
@@ -87,7 +87,16 @@ open(os.path.join(r'$root', '.env'), 'w', encoding='utf-8').write(chr(10).join(l
     }
 }
 
-# 3. Electron app
-Write-Host "[3/3] starting Electron app ..."
+# 3. Watchdog (keeps backend + tunnel alive during a recording)
+$wdRunning = Get-Process -Name python -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -match "watchdog" }
+if ($wdRunning) {
+    Write-Host "[3/4] watchdog already running"
+} else {
+    Write-Host "[3/4] starting watchdog ..."
+    Start-Process -FilePath "python" -ArgumentList "scripts/watchdog.py" -WorkingDirectory $root -WindowStyle Hidden
+}
+
+# 4. Electron app
+Write-Host "[4/4] starting Electron app ..."
 Start-Process -FilePath "cmd.exe" -ArgumentList "/c npm run dev > vite.log 2>&1" -WorkingDirectory $appDir
 Write-Host "== PRIVA is up: app window + backend :$port + tunnel $tunnel =="

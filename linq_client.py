@@ -8,7 +8,7 @@ import os
 import re
 import time
 from collections import deque
-from config import LINQ_API_KEY, LINQ_SANDBOX_NUMBER
+from config import LINQ_API_KEY, LINQ_SANDBOX_NUMBER, DEMO_MODE
 
 LINQ_API_BASE = "https://api.linqapp.com/api/partner/v3"
 
@@ -207,9 +207,31 @@ async def send_message(to: str, text: str, thread_id: str = "") -> dict:
                 data = resp.json()
                 if resp.status_code < 400 and data.get("chat", {}).get("id"):
                     _chat_ids[key] = data["chat"]["id"]
+            if DEMO_MODE and resp.status_code >= 400:
+                # Demo sandbox: pretend delivery worked. The outbound entry is
+                # already recorded; callers mirror it onto the user's thread.
+                return {"ok": True, "demo": True}
             return resp.json()
     except Exception as exc:
+        if DEMO_MODE:
+            return {"ok": True, "demo": True}
         return {"error": {"message": f"send failed: {exc}"}}
+
+
+def pop_outbound(text: str, thread_id: str = "") -> int:
+    """Drop the most recent outbound entry matching text (demo direction rewrite)."""
+    outbound = list(_outbox)
+    removed = 0
+    for i in range(len(outbound) - 1, -1, -1):
+        m = outbound[i]
+        if m.get("text") == text and (not thread_id or m.get("thread_id") == thread_id):
+            outbound.pop(i)
+            removed += 1
+            break
+    _outbox.clear()
+    _outbox.extend(outbound)
+    _save_transcript()
+    return removed
 
 
 def _g(product, key, default=None):

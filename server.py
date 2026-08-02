@@ -23,8 +23,9 @@ from linq_client import (
     send_message, send_shopping_results, send_more_options, send_consent,
     send_confirmation, verify_webhook, outbox as linq_outbox, inbox as linq_inbox,
     record_inbound, clear_thread, resolve_thread_ids, record_outbound_for,
+    pop_outbound,
 )
-from serpapi_client import search_products, search_deep
+from serpapi_client import search_products, search_deep, DAILY_CAP, quota_daily_remaining
 from prava_client import (
     create_payment_session, get_payment_status, complete_payment,
     report_payment_outcome,
@@ -156,39 +157,49 @@ async def api_config():
         "linq_configured": bool(LINQ_API_KEY),
         "linq_sandbox_number": LINQ_SANDBOX_NUMBER,
         "serpapi_configured": bool(SERPAPI_KEY),
+        "serpapi_daily_cap": DAILY_CAP,
+        "serpapi_daily_remaining": quota_daily_remaining(),
+        "demo_mode": DEMO_MODE,
+        "otp_max_attempts": users.OTP_MAX_ATTEMPTS,
     }
 
 @app.post("/api/auth/otp")
 async def api_auth_otp(payload: dict):
     """Request a login code: {phone, name?}. New phones register on first login.
 
-    DEMO_MODE returns the code inline (no SMS infrastructure needed for
-    judges). Real mode delivers it via Linq SMS.
+    Always tries a real Linq SMS first (even in DEMO_MODE); when the SMS can't
+    be delivered (fake number, Linq error, no key) the code is returned inline
+    so the demo/judge flow still works. Rate-limited per phone.
     """
     phone = users.normalize_phone(str(payload.get("phone", "")))
     if not phone:
         raise HTTPException(status_code=400, detail="Enter a valid phone number (digits only, country code first)")
     name = str(payload.get("name", "")).strip()
     user = users.issue_otp(phone, name)
+    if user.get("rate_limited"):
+        raise HTTPException(status_code=429, detail=f"Too many code requests. Try again in {user.get('retry_after')}s.")
     otp = user.get("otp", "")
     sent = False
     delivery = "inline"
-    if not DEMO_MODE and LINQ_API_KEY:
+    if LINQ_API_KEY:
         try:
-            await send_message(phone, f"PRIVA verification code: {otp}", f"otp_{user['user_id']}")
-            sent = True
-            delivery = "sms"
+            result = await send_message(phone, f"PRIVA verification code: {otp}", f"otp_{user['user_id']}")
+            delivered = bool(result) and bool(result.get("ok")) and not result.get("error") and not result.get("demo")
+            if delivered:
+                sent = True
+                delivery = "sms"
         except Exception as exc:
             emit_activity("LINQ", f"OTP SMS to {phone} failed: {exc}")
-    emit_activity("AUTH", f"OTP requested for {phone}")
+    emit_activity("AUTH", f"OTP requested for {phone} (delivery={delivery})")
     resp = {
         "ok": True,
         "user_id": user["user_id"],
         "delivery": delivery,
-        "sent": sent or DEMO_MODE,
+        "sent": True,
         "expires_in": users.OTP_TTL,
+        "attempts_remaining": users.OTP_MAX_ATTEMPTS,
     }
-    if DEMO_MODE:
+    if delivery == "inline":
         resp["otp"] = otp
     return resp
 
@@ -202,6 +213,8 @@ class OtpVerifyIn(BaseModel):
 async def api_auth_verify(req: OtpVerifyIn):
     user = users.verify_otp(req.phone, req.otp)
     if not user:
+        if users.record_wrong_otp(req.phone):
+            raise HTTPException(status_code=429, detail="Too many wrong attempts. Request a new code.")
         raise HTTPException(status_code=401, detail="Invalid or expired code")
     emit_activity("AUTH", f"{user.get('name') or user['phone']} logged in", "admin" if user.get("is_admin") else "user")
     return {**users.public_user(user), "token": user.get("token", "")}
@@ -336,6 +349,29 @@ async def api_search(req: SearchRequest, user: dict = Depends(current_user)):
     products = await search_products(req.query, req.max_price, req.limit, ns=user["user_id"])
     return {"products": [p.model_dump() for p in products]}
 
+
+_demo_search_hits: dict = {}
+_DEMO_SEARCH_MAX_PER_MIN = 12
+
+
+@app.post("/api/demo/search")
+async def api_demo_search(req: SearchRequest, request: Request):
+    """Public search sandbox for the landing-page demo (no login required).
+
+    Hard rate-limited per client IP so a judge's single page can't burn the
+    SerpApi monthly quota. Same response shape as /api/search.
+    """
+    ip = request.client.host if request.client else "unknown"
+    now = time.time()
+    hits = _demo_search_hits.get(ip, [])
+    hits = [t for t in hits if t > now - 60]
+    if len(hits) >= _DEMO_SEARCH_MAX_PER_MIN:
+        raise HTTPException(status_code=429, detail="Demo search rate limit reached. Try again in a minute.")
+    hits.append(now)
+    _demo_search_hits[ip] = hits
+    products = await search_products(req.query, req.max_price, req.limit, ns="demo")
+    return {"products": [p.model_dump() for p in products]}
+
 @app.post("/api/pay")
 async def api_pay(req: PayRequest):
     # Three-stage budget: refuse to open a session that blows the cap until
@@ -447,6 +483,18 @@ async def api_linq_send(req: LinqSendIn, user: dict = Depends(current_user)):
     thread_id = user_thread(user) if user["user_id"] != "local" else (req.thread_id or "priva_mirror")
     result = await send_message(to, req.text, thread_id)
     error = result.get("error") if isinstance(result, dict) else None
+    if error and DEMO_MODE:
+        # Demo sandbox: rewrite the direction — the user's text is INBOUND
+        # ("you → PRIVA") and PRIVA acks OUTBOUND so the chat reads correctly
+        # even when the phone number isn't a real Linq recipient.
+        pop_outbound(req.text, thread_id)
+        record_inbound(to, req.text, thread_id)
+        await send_message(
+            to,
+            "Got it. What are you looking for? Save a note and I'll find the best buy inside your budget.",
+            thread_id,
+        )
+        return {"ok": True, "sent": True, "demo": True, "thread_id": thread_id}
     emit_activity("LINQ", "web chat -> SMS", req.text[:60])
     return {"ok": True, "sent": not error, "error": error, "thread_id": thread_id}
 
@@ -895,7 +943,8 @@ async def route_inbound(from_: str, text: str, thread_id: str):
         # the most recent note offer. New shop intents never redirect.
         last = _last_offer_thread
         is_short_reply = parse_intent(text).action != "shop" and len(text.strip().split()) <= 3
-        if is_short_reply and last in conversations and conversations[last].get("step") in ("note_offer", "asking_prefs", "showing_results"):
+        live_steps = ("note_offer", "asking_prefs", "showing_results", "awaiting_consent", "payment_pending", "payment_failed")
+        if is_short_reply and last in conversations and conversations[last].get("step") in live_steps:
             mirror_to = thread_id
             thread_id = last
     user = users.user_by_phone(from_)
@@ -1209,13 +1258,13 @@ async def _notify_payment_failed(thread_id: str, address: str, txn_id: str, sess
     except Exception:
         pass
     if detail:
-        await send_message(
+        await mirror_send(
             address,
             f"Payment failed ({detail}). Reply RETRY to try again, or tell me what else to shop for.",
             thread_id,
         )
     else:
-        await send_message(
+        await mirror_send(
             address,
             "Payment could not be completed. Reply RETRY to try again, or tell me what else to shop for.",
             thread_id,
@@ -1419,6 +1468,25 @@ async def handle_choice(from_: str, text: str, thread_id: str):
             thread_id,
         )
 
+async def mirror_send(address: str, text: str, thread_id: str) -> dict:
+    """send_message + duplicate the entry onto the user's mirror chat thread.
+
+    Detached tasks (_poll_payment_and_notify, shipping worker, ...) run
+    outside route_inbound's mirroring, so their SMSes must be mirrored here or
+    the web chat never shows them.
+    """
+    result = await send_message(address, text, thread_id)
+    if address and thread_id and not (result or {}).get("mirrored"):
+        user = users.user_by_phone(address)
+        if user:
+            mirror = f"priva_mirror_{user['user_id']}"
+            if mirror != thread_id:
+                entries = linq_outbox(thread_id)
+                if entries:
+                    record_outbound_for(entries[-1], mirror)
+    return result
+
+
 async def _poll_payment_and_notify(thread_id: str, address: str, session_id: str, txn_id: str, product: dict):
     """Background: watch the Prava session; when the user pays, report APPROVED and notify.
 
@@ -1448,14 +1516,12 @@ async def _poll_payment_and_notify(thread_id: str, address: str, session_id: str
                           user_id=txn_uid if txn_uid.startswith("u_") else "local")
                 eta = time.strftime("%a %b %d", time.localtime(time.time() + 3 * 86400))
                 update_transaction(txn_id, shipping_status="confirmed", shipping_eta=eta)
-                await send_confirmation(
+                await mirror_send(
                     address,
-                    product.get("title", ""),
-                    float(product.get("price", 0)),
-                    txn_id,
+                    f"Done! {product.get('title', '')} ordered for ${float(product.get('price', 0)):.2f}. Order #{txn_id}",
                     thread_id,
                 )
-                await send_message(
+                await mirror_send(
                     address,
                     f"Order confirmed — ETA {eta}. Reply TRACK for delivery updates.",
                     thread_id,
@@ -1472,7 +1538,7 @@ async def _poll_payment_and_notify(thread_id: str, address: str, session_id: str
             return
     conv = conversations.get(thread_id, {})
     if conv.get("step") in ("payment_pending", "payment_failed"):
-        await send_message(
+        await mirror_send(
             address,
             "Payment session is still waiting. Reply STATUS to check, or RETRY to create a new one.",
             thread_id,

@@ -2,13 +2,14 @@
 
 Keeps the same async function signatures used by server.py.
 """
+import asyncio
 import logging
 from decimal import Decimal
 
 from prava_sdk import AsyncPravaClient
 from prava_sdk.models.sessions import IntegrationType, TransactionStatus
 
-from config import PRAVA_SECRET_KEY
+from config import PRAVA_SECRET_KEY, DEMO_MODE
 
 logger = logging.getLogger("priva.prava")
 
@@ -81,6 +82,10 @@ async def create_payment_session(
 
 
 async def get_payment_status(session_id: str) -> dict:
+    if DEMO_MODE and session_id:
+        # Demo pacing: a fresh sandbox session reports pending until the
+        # simulated passkey approval (complete_payment) flips it to completed.
+        return {"status": "awaiting_result", "demo": True}
     if not _configured() or not session_id:
         return {"status": "unknown", "error": "PRAVA_SECRET_KEY not configured"}
     try:
@@ -127,7 +132,15 @@ async def complete_payment(session_id: str, amount_paid: str | None = None) -> d
 
     Credentials (network token + dynamic CVV) are logged server-side only and
     never returned to the client.
+
+    DEMO_MODE: simulates the user tapping the passkey ~5s after the session is
+    created so a recorded demo completes end-to-end without waiting for the
+    sandbox's slow auto-approval. Real mode waits on the SDK.
     """
+    if DEMO_MODE:
+        await asyncio.sleep(5)
+        return {"status": "completed", "prava_status": "completed",
+                "credential_issued": True, "reported": "simulated"}
     if not _configured() or not session_id:
         return {"status": "failed", "error": "PRAVA_SECRET_KEY not configured"}
     try:

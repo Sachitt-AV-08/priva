@@ -12,10 +12,60 @@ from preferences import extract_preferences
 
 CACHE_TTL = 24 * 60 * 60
 CACHE_FILE = os.path.join(os.path.dirname(__file__), "search_cache.json")
+_USAGE_FILE = os.path.join(os.path.dirname(__file__), "serpapi_usage.json")
+DAILY_CAP = 60  # hard daily ceiling; 250/mo plan, budgeted for demo-day peaks
 _MAX_MEM_CACHE = 64
 
 _mem_cache: OrderedDict[str, dict] = OrderedDict()
 _quota_exhausted = False
+_usage_lock = False  # simple in-process mutex flag
+
+
+def _load_usage() -> dict:
+    try:
+        with open(_USAGE_FILE, encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _save_usage(usage: dict):
+    try:
+        tmp = _USAGE_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(usage, fh)
+        os.replace(tmp, _USAGE_FILE)
+    except OSError:
+        pass
+
+
+def _daily_usage() -> int:
+    usage = _load_usage()
+    today = time.strftime("%Y-%m-%d")
+    return int(usage.get(today, 0))
+
+
+def quota_daily_remaining() -> int:
+    return max(DAILY_CAP - _daily_usage(), 0)
+
+
+def _charge_quota() -> bool:
+    """Consume one daily search credit. False when the daily cap is hit."""
+    global _usage_lock
+    if _usage_lock:
+        time.sleep(0.02)
+    _usage_lock = True
+    try:
+        usage = _load_usage()
+        today = time.strftime("%Y-%m-%d")
+        used = int(usage.get(today, 0))
+        if used >= DAILY_CAP:
+            return False
+        usage[today] = used + 1
+        _save_usage(usage)
+        return True
+    finally:
+        _usage_lock = False
 
 
 def _load_disk_cache() -> dict:
@@ -141,6 +191,10 @@ def quota_exhausted() -> bool:
     return _quota_exhausted
 
 
+def _quota_blocked() -> bool:
+    return _quota_exhausted or quota_daily_remaining() <= 0
+
+
 def _price_aware(products: list[Product], max_price: Optional[float], limit: int) -> list[Product]:
     """Never return empty on a price cap: exact match -> 25% tolerance -> cheapest."""
     if not products or not max_price:
@@ -186,6 +240,10 @@ async def search_products(query: str, max_price: Optional[float] = None, limit: 
     cached = _cached(query, max_price, limit, start, ns)
     if cached is not None:
         return [Product(**p) for p in cached]
+    if _quota_blocked() or not _charge_quota():
+        if _quota_blocked():
+            print(f"[serpapi] daily cap reached — serving fallback for '{query}'", flush=True)
+        return _fallback_products(query, max_price, limit)
     try:
         params = {
             "engine": "google_shopping",
@@ -291,7 +349,9 @@ async def search_deep(item: str, query: str, max_price: Optional[float] = None,
     Hard caps total searches so the monthly quota is never blown by one
     purchase. Returns raw merged candidates; filtering happens downstream.
     """
-    if not SERPAPI_KEY:
+    if not SERPAPI_KEY or _quota_blocked():
+        if SERPAPI_KEY and _quota_blocked():
+            print("[serpapi] deep search: daily cap reached — fallback", flush=True)
         return _fallback_products(query, max_price, limit)
     from catalog import detect_category, spec_tier_query
     cat = category or detect_category(item)
@@ -308,23 +368,32 @@ async def search_deep(item: str, query: str, max_price: Optional[float] = None,
 
     pool: list[Product] = []
     searches = 0
+    remaining = quota_daily_remaining() if SERPAPI_KEY else 0
 
     async def fetch(variant: str, start: int) -> list[Product]:
         nonlocal searches
         searches += 1
         try:
-            return await search_products(variant, max_price, limit, start=start, ns=ns)
+            got = await search_products(variant, max_price, limit, start=start, ns=ns)
+            # the call itself may have hit a quota error; only trust samples
+            # when no live API exists at all
+            if not (bool(SERPAPI_KEY) and not _quota_blocked()):
+                got = [p for p in got if not str(p.id).startswith("sample_")]
+            return got
         except Exception:
             return []
+
+    def quota_ok_for(extra: int) -> bool:
+        return remaining - searches >= extra if SERPAPI_KEY else False
 
     for variant in variants[:2]:
         got = await fetch(variant, 0)
         _merge_pool(pool, got)
-    if len(pool) < 8 or _underspends(pool, max_price):
+    if (len(pool) < 8 or _underspends(pool, max_price)) and quota_ok_for(1):
         if len(variants) > 2 and searches < _MAX_SEARCHES_PER_PURCHASE:
             got = await fetch(variants[2], 0)
             _merge_pool(pool, got)
-        if len(pool) < 6 and searches < _MAX_SEARCHES_PER_PURCHASE:
+        if len(pool) < 6 and searches < _MAX_SEARCHES_PER_PURCHASE and quota_ok_for(1):
             got = await fetch(variants[0], 40)
             _merge_pool(pool, got)
     return pool[: max(limit * 4, 40)]
