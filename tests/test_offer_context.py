@@ -65,6 +65,29 @@ def test_pending_transaction_does_not_block_offer(monkeypatch):
     assert srv._already_purchased("running shoes") is False
 
 
+def test_already_purchased_is_scoped_to_user(monkeypatch):
+    import server as srv
+    txn = {"id": "t3", "user_id": "u_bob", "status": "completed", "product_title": "Cloudfoam Running Shoes"}
+    monkeypatch.setattr(srv, "get_transactions", lambda: [txn])
+    monkeypatch.setattr(srv.spending_store, "purchases", lambda: [{"user_id": "u_bob", "title": "Sports Wireless Earbuds"}])
+    # Bob's own purchases block Bob...
+    assert srv._already_purchased("running shoes", "u_bob") is True
+    assert srv._already_purchased("wireless earbuds", "u_bob") is True
+    # ...but never Alice
+    assert srv._already_purchased("running shoes", "u_alice") is False
+    assert srv._already_purchased("wireless earbuds", "u_alice") is False
+
+
+def test_already_purchased_matches_user_phone(monkeypatch):
+    import server as srv
+    txn = {"id": "t4", "user_id": "+12025550123", "status": "completed", "product_title": "Desk Lamp"}
+    monkeypatch.setattr(srv, "get_transactions", lambda: [txn])
+    monkeypatch.setattr(srv.spending_store, "purchases", lambda: [])
+    monkeypatch.setattr(srv.users, "phone_for", lambda uid: "+12025550123" if uid == "u_owner" else "")
+    assert srv._already_purchased("desk lamp", "u_owner") is True
+    assert srv._already_purchased("desk lamp", "u_stranger") is False
+
+
 # ---------- urgent offer fires fast, normal offer waits ----------
 
 def test_urgent_note_fires_immediately(monkeypatch):
@@ -101,10 +124,10 @@ def test_urgent_sms_has_prefix(monkeypatch, tmp_path):
     monkeypatch.setattr(srv, "NOTE_OFFER_DELAY", 60)
     monkeypatch.setattr(srv, "detect_urgency", lambda t: "flight" in t)
     monkeypatch.setattr(srv, "outgoing_address", lambda: "+15550001111")
-    monkeypatch.setattr(srv, "recently_offered", lambda nid: False)
+    monkeypatch.setattr(srv, "recently_offered", lambda nid, **kw: False)
     monkeypatch.setattr(srv, "was_offered", lambda nid, item: False)
     monkeypatch.setattr(srv, "mark_offered", lambda nid, item, tid: None)
-    monkeypatch.setattr(srv, "_already_purchased", lambda item: False)
+    monkeypatch.setattr(srv, "_already_purchased", lambda item, user_id="local": False)
 
     from note_analyzer import analyze_note
 

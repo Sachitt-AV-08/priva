@@ -68,15 +68,29 @@ def was_offered(note_id: str, item: str) -> bool:
     return any(o.get("note_id") == note_id and o.get("item", "").lower() == item.lower() for o in offers)
 
 
-def recently_offered(note_id: str, window_secs: int = 600) -> bool:
-    """True if ANY offer was sent for this note within the cooldown window.
+def recently_offered(note_id: str, window_secs: int = 600, item: str = "") -> bool:
+    """True if THIS note was offered the same (or a token-overlapping) item
+    within the cooldown window.
 
     Stops per-keystroke note saves from firing a fresh SMS for every
     intermediate version of an item phrase ("running" -> "running shoes").
+    A genuinely new intent (different item) in the same note is NOT blocked.
     """
     cutoff = int(time.time()) - window_secs
     offers = _load(OFFERS_FILE)
-    return any(o.get("note_id") == note_id and o.get("offered_at", 0) >= cutoff for o in offers)
+    item = (item or "").lower().strip()
+    item_tokens = {w for w in item.split() if len(w) > 3}
+    for o in offers:
+        if o.get("note_id") != note_id or o.get("offered_at", 0) < cutoff:
+            continue
+        prev = (o.get("item", "") or "").lower()
+        if prev == item:
+            return True
+        if item_tokens and prev:
+            shared = item_tokens & {w for w in prev.split() if len(w) > 3}
+            if len(shared) >= 2 or (len(shared) == 1 and len(item.split()) == 1):
+                return True
+    return False
 
 
 def mark_offered(note_id: str, item: str, thread_id: str = ""):

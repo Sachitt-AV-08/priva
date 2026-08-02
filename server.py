@@ -124,6 +124,23 @@ def require_admin(user: dict = Depends(current_user)) -> dict:
     return user
 
 
+def require_user(user: dict = Depends(current_user)) -> dict:
+    """A real authenticated account (the local/SMS-only fallback is NOT enough)."""
+    if not user or user.get("user_id") == "local":
+        raise HTTPException(status_code=401, detail="Login required")
+    return user
+
+
+def _txn_owned(user: dict, txn_user: str) -> bool:
+    """Admin owns everything; others only their own user_id or registered phone."""
+    if user.get("is_admin"):
+        return True
+    if not txn_user:
+        return False
+    uid = user.get("user_id", "")
+    return txn_user == uid or txn_user == users.phone_for(uid)
+
+
 def user_phone(user: dict) -> str:
     """The phone PRIVA should text for this user (falls back to the owner address)."""
     if user.get("user_id") and user["user_id"] != "local":
@@ -244,7 +261,12 @@ async def list_transactions(user: dict = Depends(current_user)):
     return {"transactions": get_transactions(user["user_id"])}
 
 @app.post("/api/transactions/{txn_id}/status")
-async def update_txn_status(txn_id: str, status: str):
+async def update_txn_status(txn_id: str, status: str, user: dict = Depends(require_user)):
+    txn = next((t for t in get_transactions() if t["id"] == txn_id), None)
+    if not txn:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+    if not _txn_owned(user, txn.get("user_id")):
+        raise HTTPException(status_code=403, detail="Not your transaction")
     update_transaction(txn_id, status=status)
     return {"ok": True}
 
@@ -289,10 +311,12 @@ async def _shipping_worker():
 
 
 @app.post("/api/transactions/{txn_id}/shipping/advance")
-async def api_shipping_advance(txn_id: str):
+async def api_shipping_advance(txn_id: str, user: dict = Depends(require_user)):
     txn = next((t for t in get_transactions() if t["id"] == txn_id), None)
     if not txn:
         raise HTTPException(status_code=404, detail="Transaction not found")
+    if not _txn_owned(user, txn.get("user_id")):
+        raise HTTPException(status_code=403, detail="Not your transaction")
     current = txn.get("shipping_status") or "confirmed"
     idx = SHIPPING_STEPS.index(current) if current in SHIPPING_STEPS else 0
     if idx < len(SHIPPING_STEPS) - 1:
@@ -305,29 +329,41 @@ async def api_shipping_advance(txn_id: str):
 
 class BudgetIn(BaseModel):
     limit: float
+    user_id: str = ""
+
+
+def _budget_uid(user: dict) -> str:
+    """'' addresses the global/legacy budget; a real account its own budget."""
+    return "" if user.get("user_id") == "local" else user["user_id"]
 
 
 @app.get("/api/budget")
-async def api_budget():
-    limit = spending_store.get_budget()
+async def api_budget(user: dict = Depends(current_user)):
+    uid = _budget_uid(user)
+    limit = spending_store.get_budget(uid)
     return {
         "limit": limit,
-        "spent_this_month": spending_store.spent_this_month(),
-        "remaining": spending_store.remaining(),
+        "spent_this_month": spending_store.spent_this_month(user_id=uid),
+        "remaining": spending_store.remaining(user_id=uid),
         "month": spending_store._month(),
+        "user_id": uid or None,
     }
 
 
 @app.put("/api/budget")
-async def api_budget_set(req: BudgetIn):
-    spending_store.set_budget(req.limit)
+async def api_budget_set(req: BudgetIn, user: dict = Depends(require_user)):
+    target = req.user_id or user["user_id"]
+    if target != user["user_id"] and not user.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Only admins can set another user's budget")
+    spending_store.set_budget(req.limit, target)
     emit_activity("BUDGET", f"monthly limit set", f"${req.limit:.2f}")
-    return await api_budget()
+    return await api_budget({"user_id": target})
 
 
 @app.get("/api/spending/analysis")
-async def api_spending_analysis():
-    return {"analysis": spending_store.analysis()}
+async def api_spending_analysis(user: dict = Depends(current_user)):
+    uid = _budget_uid(user)
+    return {"analysis": spending_store.analysis(user_id=uid)}
 
 class SearchRequest(BaseModel):
     query: str
@@ -373,17 +409,17 @@ async def api_demo_search(req: SearchRequest, request: Request):
     return {"products": [p.model_dump() for p in products]}
 
 @app.post("/api/pay")
-async def api_pay(req: PayRequest):
+async def api_pay(req: PayRequest, user: dict = Depends(require_user)):
     # Three-stage budget: refuse to open a session that blows the cap until
     # the user explicitly approves borrowing from next month.
-    tier = spending_store.tier_for(req.price)
+    tier = spending_store.tier_for(req.price, user_id=user["user_id"])
     if tier.get("tier") == "exceeds" and not req.budget_excess:
         raise HTTPException(
             status_code=409,
             detail=json.dumps({"tier": "exceeds", "excess": tier["excess"], "limit": tier["limit"]}),
         )
     result = await create_payment_session(
-        user_id=req.user_id,
+        user_id=user["user_id"],
         user_email="user@priva.app",
         total_amount=str(req.price),
         currency="USD",
@@ -406,7 +442,7 @@ async def api_pay(req: PayRequest):
     return result
 
 @app.get("/api/pay/status")
-async def api_pay_status(session_id: str):
+async def api_pay_status(session_id: str, user: dict = Depends(require_user)):
     return await get_payment_status(session_id)
 
 class PayCompleteRequest(BaseModel):
@@ -416,7 +452,13 @@ class PayCompleteRequest(BaseModel):
     budget_excess: float | None = None
 
 @app.post("/api/pay/complete")
-async def api_pay_complete(req: PayCompleteRequest):
+async def api_pay_complete(req: PayCompleteRequest, user: dict = Depends(require_user)):
+    if req.transaction_id:
+        txn = next((t for t in get_transactions() if t["id"] == req.transaction_id), None)
+        if not txn:
+            raise HTTPException(status_code=404, detail="Transaction not found")
+        if not _txn_owned(user, txn.get("user_id")):
+            raise HTTPException(status_code=403, detail="Not your transaction")
     result = await complete_payment(req.session_id, str(req.amount) if req.amount else None)
     if req.transaction_id:
         status = result.get("status", "pending")
@@ -435,12 +477,12 @@ async def api_pay_complete(req: PayCompleteRequest):
                     user_id=txn_uid,
                 )
                 if req.budget_excess:
-                    spending_store.record_borrow(req.budget_excess)
+                    spending_store.record_borrow(req.budget_excess, user_id=txn_uid)
                     emit_activity("BUDGET", "borrowed from next month", f"${req.budget_excess:.2f}")
     return result
 
 @app.post("/api/transactions/refresh")
-async def api_transactions_refresh():
+async def api_transactions_refresh(user: dict = Depends(require_user)):
     for txn in get_transactions():
         if txn.get("status") == "pending" and txn.get("prava_session_id"):
             prava = await get_payment_status(txn["prava_session_id"])
@@ -448,7 +490,8 @@ async def api_transactions_refresh():
                 txn["id"],
                 prava_status=prava.get("status", ""),
             )
-    return {"transactions": get_transactions()}
+    mine = get_transactions(user["user_id"]) if not user.get("is_admin") else get_transactions()
+    return {"transactions": mine}
 
 @app.get("/api/agent/activity")
 async def api_activity(note_id: str = ""):
@@ -583,14 +626,14 @@ async def api_note_analyze(note_id: str = "", user: dict = Depends(current_user)
         note = get_note(note_id, user["user_id"])
         if not note:
             raise HTTPException(status_code=404, detail="Note not found")
-        return analyze_note(note)
-    return {"notes": [{"id": n["id"], **analyze_note(n)} for n in list_notes(user["user_id"])]}  
+        return _analyze_with_offer_state(note)
+    return {"notes": [_analyze_with_offer_state(n) for n in list_notes(user["user_id"])]}  
 
 
 @app.post("/api/notes/analyze-text")
 async def api_note_analyze_text(note: NoteIn):
     """Analyze arbitrary note text (used by the public web demo)."""
-    return await analyze_note_llm(note.model_dump())
+    return await _analyze_with_offer_state_async(note.model_dump())
 
 
 @app.get("/api/demo/register-phone")
@@ -630,6 +673,38 @@ async def api_webhook_log(limit: int = 20):
     return {"events": list(_webhook_log)[:limit]}
 
 
+def _analyze_with_offer_state(note: dict) -> dict:
+    """Rule-based analysis + honest offer_state for the notes UI badge."""
+    base = analyze_note(note)
+    return {**base, "offer_state": _offer_state_for(note, base)}
+
+
+async def _analyze_with_offer_state_async(note: dict) -> dict:
+    """LLM analysis + honest offer_state (analyze-text / demo path)."""
+    base = await analyze_note_llm(note)
+    return {**base, "offer_state": _offer_state_for(note, base)}
+
+
+def _offer_state_for(note: dict, analysis: dict) -> str:
+    """sent / already_purchased / cooldown / offered_again / not_shopping"""
+    intents = analysis.get("buy_intents") or []
+    if not intents:
+        return "not_shopping"
+    note_id = note.get("id", "")
+    first = intents[0]
+    item = clean_item(first.get("item", ""), first.get("prefs") or {}) or first.get("item", "")
+    if not item:
+        return "not_shopping"
+    note_user = note.get("user_id", "local")
+    if _already_purchased(item, note_user):
+        return "already_purchased"
+    if was_offered(note_id, item) and recently_offered(note_id, item=item):
+        return "already_offered"
+    if recently_offered(note_id, item=item):
+        return "cooldown"
+    return "sent"
+
+
 def _schedule_note_offer(note: dict):
     """Debounced offer: fires NOTE_OFFER_DELAY after the user STOPS editing.
 
@@ -647,12 +722,15 @@ def _schedule_note_offer(note: dict):
         task.cancel()
     blocks = note.get("blocks") or []
     text = " ".join(b.get("content", "") for b in blocks if isinstance(b, dict))
-    text = f"{note.get('title', '')} {text}"
+    text = f"{note.get('title', '')} {text}".strip()
+    # Nothing to analyze -> don't schedule and don't claim a buy intent.
+    if not text:
+        return
     urgent = detect_urgency(text)
     delay = URGENT_OFFER_DELAY if urgent else NOTE_OFFER_DELAY
     emit_activity(
         "NOTE ANALYZER",
-        f"{'urgent' if urgent else 'scheduled'} buy intent offer",
+        "analyzing note for buy intent",
         f"+{delay}s",
         note_id=note_id,
     )
@@ -669,11 +747,24 @@ def _schedule_note_offer(note: dict):
     _offer_tasks[note_id] = asyncio.create_task(_run())
 
 
-def _already_purchased(item: str) -> bool:
-    """True when the user already bought a matching product (app checkout or SMS arc)."""
+def _already_purchased(item: str, user_id: str = "local") -> bool:
+    """True when THIS user already bought a matching product (app checkout or SMS arc).
+
+    Scoped to the user (their user_id or registered phone), so one user's
+    purchase never suppresses offers for another. Legacy entries without a
+    user_id only count for the local/SMS flow.
+    """
     item = (item or "").lower().strip()
     if not item:
         return False
+    uids = {user_id or "local"}
+    phone = users.phone_for(user_id)
+    if phone:
+        uids.add(phone)
+
+    def uid_match(t: str) -> bool:
+        return t in uids or (not t and "local" in uids)
+
     item_tokens = {w for w in item.split() if len(w) > 2}
 
     def matches(title: str) -> bool:
@@ -684,9 +775,13 @@ def _already_purchased(item: str) -> bool:
         return len(shared) >= 2 or any(len(w) >= 8 for w in shared)
 
     for txn in get_transactions():
+        if not uid_match(txn.get("user_id")):
+            continue
         if txn.get("status") == "completed" and matches(txn.get("product_title", "")):
             return True
     for p in spending_store.purchases():
+        if not uid_match(p.get("user_id")):
+            continue
         if matches(p.get("title", "")):
             return True
     return False
@@ -706,14 +801,18 @@ async def _maybe_offer_from_note(note: dict, urgent: bool = False):
     first = buy_intents[0]
     prefs = first.get("prefs") or {}
     item = clean_item(first["item"], prefs) or first["item"]
-    if was_offered(note["id"], item):
+    # Same note + same item was offered recently -> don't spam the same thing.
+    # was_offered is per note+item; a NEW intent in this note is always allowed,
+    # and the same item can be re-offered once the cooldown window elapses.
+    if was_offered(note["id"], item) and recently_offered(note["id"], item=item):
+        emit_activity("NOTE ANALYZER", "already offered — not re-texting", item, note_id=note["id"])
         return
-    if recently_offered(note["id"]):
+    if recently_offered(note["id"], item=item):
         emit_activity("NOTE ANALYZER", "offer cooldown — skipping", item, note_id=note["id"])
         return
     if len(item) < 4:
         return
-    if _already_purchased(item):
+    if _already_purchased(item, note_user):
         mark_offered(note["id"], item, "")
         emit_activity("NOTE ANALYZER", "already purchased — skipping offer", item, note_id=note["id"])
         return
@@ -1290,7 +1389,7 @@ async def _check_payment_status(thread_id: str, from_: str, conv: dict):
             spending_store.record_purchase(txn.get("product_title", ""), txn.get("merchant", ""), float(txn.get("amount", 0) or 0), txn_id, user_id=txn_uid)
             excess = conv.get("budget_excess")
             if excess:
-                spending_store.record_borrow(excess)
+                spending_store.record_borrow(excess, user_id=txn_uid)
                 emit_activity("BUDGET", "borrowed from next month", f"${excess:.2f}")
             emit_activity("PRAVA", "payment APPROVED", txn.get("prava_session_id", "")[:24], note_id=txn.get("note_id", ""))
             emit_activity("PAID", f"{txn.get('product_title', '')} paid", f"${txn.get('amount')}", note_id=txn.get("note_id", ""))
@@ -1508,7 +1607,7 @@ async def _poll_payment_and_notify(thread_id: str, address: str, session_id: str
                 txn_uid = _conv.get("user_id") or (users.user_by_phone(address) or {}).get("user_id") or "local"
                 spending_store.record_purchase(product.get("title", ""), product.get("merchant", ""), float(product.get("price", 0) or 0), txn_id, user_id=txn_uid)
                 if _excess:
-                    spending_store.record_borrow(_excess)
+                    spending_store.record_borrow(_excess, user_id=txn_uid)
                     emit_activity("BUDGET", "borrowed from next month", f"${_excess:.2f}")
                 emit_activity("PRAVA", "payment APPROVED", session_id[:24], note_id=_conv.get("note_id", ""))
                 emit_activity("PAID", f"{product.get('title', '')} paid", f"${product.get('price', 0)}", note_id=_conv.get("note_id", ""))

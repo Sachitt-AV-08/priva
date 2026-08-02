@@ -300,9 +300,9 @@ def test_note_offer_cleans_item_before_query(monkeypatch):
         return _sample_products(under_budget=True)
     monkeypatch.setattr(srv, "search_deep", fake_search)
     monkeypatch.setattr(srv, "outgoing_address", lambda: "+10000000000")
-    monkeypatch.setattr(srv, "was_offered", lambda *a: False)
-    monkeypatch.setattr(srv, "recently_offered", lambda *a: False)
-    monkeypatch.setattr(srv, "mark_offered", lambda *a: None)
+    monkeypatch.setattr(srv, "was_offered", lambda *a, **kw: False)
+    monkeypatch.setattr(srv, "recently_offered", lambda *a, **kw: False)
+    monkeypatch.setattr(srv, "mark_offered", lambda *a, **kw: None)
     srv.conversations.pop("pref_note_clean", None)
 
     note = {
