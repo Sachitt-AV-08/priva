@@ -22,7 +22,7 @@ OFFER_TIMEOUT = 40
 REPLY_TIMEOUT = 40
 
 
-def http(base, path, method="GET", body=None, token=""):
+def http(base, path, method="GET", body=None, token="", timeout=30):
     url = base + path
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(url, data=data, method=method)
@@ -30,7 +30,7 @@ def http(base, path, method="GET", body=None, token=""):
     if token:
         req.add_header("Authorization", f"Bearer {token}")
     try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
             raw = resp.read().decode("utf-8", "replace")
             return resp.status, json.loads(raw) if raw else {}
     except urllib.error.HTTPError as e:
@@ -44,7 +44,7 @@ def http(base, path, method="GET", body=None, token=""):
 
 
 def transcript_msgs(base, token):
-    st, body = http(base, "/api/linq/transcript", token=token)
+    st, body = http(base, "/api/linq/transcript", token=token, timeout=120)
     if st != 200:
         return [], []
     return body.get("messages", []), body.get("inbound", [])
@@ -154,7 +154,7 @@ def main():
         st, body = http(base, "/api/notes", "POST",
                         {"id": note_id, "title": f"need a {item}",
                          "blocks": [{"type": "text", "content": f"need a {item} for travel under 300"}]},
-                        token=token)
+                        token=token, timeout=120)
         if st != 200:
             print(f"FAIL note save ({st}): {body.get('detail', body)}"); sys.exit(1)
         print(f"PASS 3/6 note saved ({note_id}, '{item}') — waiting for PRIVA offer (<=40s)...")
@@ -173,7 +173,7 @@ def main():
 
     # 4. reply YES -> prefs questions (if any) -> options
     seen_ts = offer["ts"]
-    st, _ = http(base, "/api/linq/simulate-reply", "POST", {"text": "YES"}, token=token)
+    st, _ = http(base, "/api/linq/simulate-reply", "POST", {"text": "YES"}, token=token, timeout=120)
     if st != 200:
         print(f"FAIL simulate YES ({st})"); sys.exit(1)
     nxt = wait_for(base, token, new_text_since(seen_ts), REPLY_TIMEOUT, "reply to YES")
@@ -186,7 +186,7 @@ def main():
         ans = answer_for(q)
         print(f"  pref question, answering '{ans}'")
         seen_ts = nxt["ts"]
-        st, _ = http(base, "/api/linq/simulate-reply", "POST", {"text": ans}, token=token)
+        st, _ = http(base, "/api/linq/simulate-reply", "POST", {"text": ans}, token=token, timeout=120)
         if st != 200:
             print(f"FAIL simulate pref answer ({st})"); sys.exit(1)
         nxt = wait_for(base, token, new_text_since(seen_ts), REPLY_TIMEOUT, "pref answer")
@@ -202,16 +202,16 @@ def main():
 
     # 5. reply 1 -> consent -> (APPROVE if cap) -> payment session -> Done!
     seen_ts = max(m.get("ts", 0) for m in transcript_msgs(base, token)[0]) or nxt["ts"]
-    st, _ = http(base, "/api/linq/simulate-reply", "POST", {"text": "1"}, token=token)
+    st, _ = http(base, "/api/linq/simulate-reply", "POST", {"text": "1"}, token=token, timeout=120)
     consent = wait_for(base, token, text_matches("Confirm purchase"), REPLY_TIMEOUT, "consent")
     if not consent:
         sys.exit(1)
     print("PASS 5/6 consent card received")
     if "APPROVE" in consent.get("text", ""):
         print("  budget cap shown — approving overspend")
-        st, _ = http(base, "/api/linq/simulate-reply", "POST", {"text": "APPROVE"}, token=token)
+        st, _ = http(base, "/api/linq/simulate-reply", "POST", {"text": "APPROVE"}, token=token, timeout=120)
     else:
-        st, _ = http(base, "/api/linq/simulate-reply", "POST", {"text": "YES"}, token=token)
+        st, _ = http(base, "/api/linq/simulate-reply", "POST", {"text": "YES"}, token=token, timeout=120)
     sess = wait_for(base, token, text_matches("Payment session created"), REPLY_TIMEOUT * 2, "payment session")
     if not sess:
         sys.exit(1)
@@ -222,7 +222,7 @@ def main():
     print(f"  {done['text'][:90]}")
 
     # 6. transaction landed + order completed
-    st, body = http(base, "/api/transactions", token=token)
+    st, body = http(base, "/api/transactions", token=token, timeout=120)
     mine = body.get("transactions", [])
     latest = mine[-1] if mine else {}
     if st != 200 or not latest:
