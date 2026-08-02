@@ -18,5 +18,9 @@ export async function apiFetch(path: string, init?: RequestInit): Promise<Respon
   if (init?.body && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
+  // ngrok free-tier serves an interstitial page to browser requests unless this
+  // header is present; without it, fetch() gets HTML instead of JSON and the
+  // whole site reports "Failed to fetch" / Reconnecting.
+  if (PRIVA_API.includes("ngrok")) headers.set("ngrok-skip-browser-warning", "true");
   return fetch(`${PRIVA_API}${path}`, { ...init, headers });
 }
