@@ -26,16 +26,23 @@ def _save(path: str, data):
         pass
 
 
-def list_notes() -> list[dict]:
-    return _load(NOTES_FILE)
+def list_notes(user_id: str = "") -> list[dict]:
+    notes = _load(NOTES_FILE)
+    if user_id:
+        return [n for n in notes if n.get("user_id") == user_id]
+    return notes
 
 
-def get_note(note_id: str) -> dict | None:
-    return next((n for n in list_notes() if n.get("id") == note_id), None)
+def get_note(note_id: str, user_id: str = "") -> dict | None:
+    note = next((n for n in list_notes() if n.get("id") == note_id), None)
+    if note and user_id and note.get("user_id") != user_id:
+        return None
+    return note
 
 
-def save_note(note: dict) -> dict:
+def save_note(note: dict, user_id: str = "local") -> dict:
     notes = list_notes()
+    note["user_id"] = user_id or note.get("user_id", "local")
     note["updated_at"] = int(note.get("updated_at", time.time()))
     for i, n in enumerate(notes):
         if n.get("id") == note["id"]:

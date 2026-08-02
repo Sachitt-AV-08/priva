@@ -6,16 +6,18 @@
 *.pem
 
 # runtime state (generated locally)
-priva/transcript.json
-priva/transcript.json.bak
-priva/notes.json
-priva/note_offers.json
-priva/reminders.json
-priva/spending.json
-priva/transactions.json
-priva/watchlist.json
-priva/link_cache.json
-priva/search_cache.json
+transcript.json
+transcript.json.bak
+notes.json
+note_offers.json
+reminders.json
+spending.json
+transactions.json
+watchlist.json
+link_cache.json
+search_cache.json
+users.json
+user_address_override.json
 
 # python
 __pycache__/
@@ -29,3 +31,6 @@ priva-app/dist-electron/
 priva-app/.vite/
 priva-app/release/
 priva-app/*.exe
+priva-site/node_modules/
+priva-site/.next/
+priva-site/out/

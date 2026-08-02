@@ -29,7 +29,8 @@ def _save(data: list):
         pass
 
 
-def add_reminder(text: str, due_at: int, note_id: str = "", channel: str = "linq+toast") -> dict:
+def add_reminder(text: str, due_at: int, note_id: str = "", channel: str = "linq+toast",
+                 user_id: str = "local", address: str = "") -> dict:
     reminder = {
         "id": f"rem_{uuid.uuid4().hex[:10]}",
         "note_id": note_id,
@@ -37,6 +38,8 @@ def add_reminder(text: str, due_at: int, note_id: str = "", channel: str = "linq
         "due_at": int(due_at),
         "channel": channel,
         "fired": False,
+        "user_id": user_id,
+        "address": address,
         "created_at": int(time.time()),
     }
     reminders = _load()
@@ -45,8 +48,10 @@ def add_reminder(text: str, due_at: int, note_id: str = "", channel: str = "linq
     return reminder
 
 
-def list_reminders(include_fired: bool = False) -> list:
+def list_reminders(include_fired: bool = False, user_id: str = "") -> list:
     reminders = _load()
+    if user_id:
+        reminders = [r for r in reminders if r.get("user_id") == user_id]
     if not include_fired:
         reminders = [r for r in reminders if not r.get("fired")]
     return sorted(reminders, key=lambda r: r["due_at"])
@@ -98,10 +103,11 @@ class ReminderScheduler:
         now = int(time.time())
         due = [r for r in list_reminders(include_fired=True) if not r.get("fired") and r.get("due_at", 0) <= now]
         for reminder in due:
-            address = self.address_fn() if self.address_fn else (LINQ_USER_ADDRESS or "")
+            address = reminder.get("address") or (self.address_fn() if self.address_fn else (LINQ_USER_ADDRESS or ""))
             if address:
                 try:
-                    await send_message(address, f"⏰ Reminder: {reminder['text']}", "")
+                    thread_id = f"priva_mirror_{reminder['user_id']}" if reminder.get("user_id") not in ("", "local") else ""
+                    await send_message(address, f"⏰ Reminder: {reminder['text']}", thread_id)
                 except Exception:
                     pass
             _mark_fired(reminder["id"])

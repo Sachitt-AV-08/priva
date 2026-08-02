@@ -2,7 +2,7 @@
 
 > Your iMessage-native AI shopping assistant. PRIVA reads the notes you already keep, finds the best buys inside your budget, pays with **Prava (Visa Intelligent Commerce)**, and chats with you over **Linq SMS** — while a mirror web app keeps the whole conversation on screen.
 
-Built for the Agentic Commerce Hackathon. **2nd place, Agentic Hackathon (AgenticAI A1 Arena)** runner-up-grade polish; 127 tests passing.
+Built for the Agentic Commerce Hackathon. **2nd place, Agentic Hackathon (AgenticAI A1 Arena)** runner-up-grade polish; 151 tests passing.
 
 ---
 
@@ -56,38 +56,47 @@ Built for the Agentic Commerce Hackathon. **2nd place, Agentic Hackathon (Agenti
 | Checkout | Prava / Visa Intelligent Commerce (sandbox) |
 | Messaging | Linq (SMS sandbox, HMAC-verified webhooks) |
 | Intelligence | Rule-based intent + budget-band spec matching; optional OpenAI gpt-4o-mini (`OPENAI_API_KEY`) |
-| Frontend | TypeScript, React 18, Vite, @xyflow/react (purchase graph) |
-| Shell | Electron 28 (desktop), PowerShell/Batch launchers |
+| Web | Next.js 14 static export (GitHub Pages) — login, dashboard, shop, admin console |
+| Desktop | Electron 28 + React 18 + Vite |
 
 ## Repository layout
 
-- `priva/` — FastAPI backend (server, agent, serpapi, prava, linq, notes, reminders, price watch, spending, voice) + 127 tests
-- `priva-app/` — React/TypeScript web + Electron app (builds to a static site for GitHub Pages)
+- Backend at repo root — `server.py`, `agent.py`, `users.py`, `serpapi_client.py`, `prava_client.py`, `linq_client.py`, `notes_store.py`, `reminder_service.py`, `price_watch.py`, `spending.py` + 151 tests in `tests/`
+- `priva-site/` — Next.js web app (landing, OTP login, dashboard with live SMS mirror chat, shop, checkout, owner admin console)
+- `priva-app/` — Electron desktop app (OTP login, chat world mirroring the same SMS thread, commerce, notes, purchase graph)
+
+## Multi-user demo
+
+- Sign up with **phone + name + OTP** (demo mode returns the code inline; real mode texts it via Linq).
+- Every user gets a **per-user SMS mirror thread** (`priva_mirror_<uid>`): the same Linq conversation appears simultaneously on their phone, in the web app chat, and in the desktop app chat.
+- The owner (phone set in `PRIVA_ADMIN_ADDRESS`) gets an **admin console** — all users, their live transcripts, and the agent activity feed.
+- State is stored per user: notes, reminders, watchlist, transactions, purchases. The SMS-only flow (`user_id="local"`) still works unchanged for a single-owner setup.
+- QR deep-link flow: the desktop app logs in and the web app accepts `/app?u=<user_id>` (demo mode only) so a judge's phone is in instantly.
 
 ## Run it
 
 ### Backend
 
 ```bash
-cd priva
 pip install -r requirements.txt
 cp .env.example .env        # fill in keys
 python server.py            # → http://localhost:8766  (/health)
-python -m pytest tests/     # 127 passing
+python -m pytest tests/     # 151 passing
 ```
 
 ### Web app
 
 ```bash
-cd priva-app
+cd priva-site
 npm install
-npm run dev                 # → http://localhost:5173 (web-only mode)
-npm run build               # static site → dist/
+npm run dev                 # → http://localhost:3000
+npm run build               # static site → out/ (deploys to GitHub Pages)
 ```
 
 ### Desktop app (Electron)
 
 ```bash
+cd priva-app
 npm run electron:dev        # or: npm run package → portable .exe
 ```
 
@@ -99,8 +108,8 @@ npm run electron:dev        # or: npm run package → portable .exe
 
 ## Deploy
 
-- **Backend**: Render free tier — click *New → Blueprint* and point at this repo (`render.yaml` included). Set env vars from `.env.example`. The server auto-picks Render's `$PORT`.
-- **Frontend**: GitHub Pages — the `deploy-pages` workflow builds `priva-app` and publishes `dist/`. The app auto-probes the backend at runtime (env `VITE_API_BASE` → known endpoints → `localhost`), so one build works everywhere.
+- **Backend**: Render free tier — click *New → Blueprint* and point at this repo (`render.yaml` included). Set env vars from `.env.example` (owner phone in `PRIVA_ADMIN_ADDRESS`). The server auto-picks Render's `$PORT`.
+- **Frontend**: GitHub Pages — the `deploy-pages` workflow builds `priva-site` (Next.js static export) and publishes `out/`. The web app auto-probes the backend at runtime (env `NEXT_PUBLIC_PRIVA_API` → known endpoints → `localhost`), so one build works everywhere.
 
 ## Environment variables
 
@@ -111,12 +120,13 @@ npm run electron:dev        # or: npm run package → portable .exe
 | `PRAVA_SECRET_KEY` / `PRAVA_PUBLISHABLE_KEY` | Prava sandbox checkout |
 | `SERPAPI_KEY` | Google Shopping deep search |
 | `NOTE_LLM` / `OPENAI_API_KEY` | Optional LLM-enhanced note analysis |
-| `DEMO_MODE=1` | Choreographed demo mode (staged beats, no real SMS needed) |
+| `DEMO_MODE=1` | Choreographed demo mode (staged beats, inline OTP codes, no real SMS needed) |
+| `PRIVA_ADMIN_ADDRESS` | Phone (digits + country code) of the owner — becomes admin (owner console) |
 
 ## Tests
 
 ```
-python -m pytest priva/tests/ -q   # 127 passed
+python -m pytest tests/ -q   # 151 passed
 ```
 
-Covers: budget tiers & caps, note intelligence, offer context, preferences, purchase advisor, reach/ranking, spending, transcript mirroring (SMS ⇄ web), voice clear.
+Covers: budget tiers & caps, note intelligence, offer context, preferences, purchase advisor, reach/ranking, spending, transcript mirroring (SMS ⇄ web), auth (OTP/token/admin), multi-user scoping, voice clear.

@@ -36,17 +36,17 @@ def _save_disk_cache(cache: dict):
         pass
 
 
-def _cache_key(query: str, max_price: Optional[float], limit: int, start: int = 0) -> str:
+def _cache_key(query: str, max_price: Optional[float], limit: int, start: int = 0, ns: str = "") -> str:
     if max_price is not None:
         if float(max_price).is_integer():
             max_price = int(max_price)
         else:
             max_price = round(float(max_price), 2)
-    return f"{query.strip().lower()}|{max_price}|{limit}|{start}"
+    return f"{ns or '-'}|{query.strip().lower()}|{max_price}|{limit}|{start}"
 
 
-def _cached(query: str, max_price: Optional[float], limit: int, start: int = 0) -> Optional[list[dict]]:
-    key = _cache_key(query, max_price, limit, start)
+def _cached(query: str, max_price: Optional[float], limit: int, start: int = 0, ns: str = "") -> Optional[list[dict]]:
+    key = _cache_key(query, max_price, limit, start, ns)
     mem = _mem_cache.get(key)
     if mem and time.time() - mem["ts"] < CACHE_TTL:
         return mem["products"]
@@ -58,8 +58,8 @@ def _cached(query: str, max_price: Optional[float], limit: int, start: int = 0) 
     return None
 
 
-def _store_cache(query: str, max_price: Optional[float], limit: int, products: list[dict], start: int = 0):
-    key = _cache_key(query, max_price, limit, start)
+def _store_cache(query: str, max_price: Optional[float], limit: int, products: list[dict], start: int = 0, ns: str = ""):
+    key = _cache_key(query, max_price, limit, start, ns)
     entry = {"ts": time.time(), "products": products}
     _mem_cache[key] = entry
     _mem_cache.move_to_end(key)
@@ -180,10 +180,10 @@ def _fallback_products(query: str, max_price: Optional[float], limit: int) -> li
     return _price_aware(samples, max_price, limit) or samples[:limit]
 
 
-async def search_products(query: str, max_price: Optional[float] = None, limit: int = 5, start: int = 0) -> list[Product]:
+async def search_products(query: str, max_price: Optional[float] = None, limit: int = 5, start: int = 0, ns: str = "") -> list[Product]:
     if not SERPAPI_KEY:
         return _fallback_products(query, max_price, limit)
-    cached = _cached(query, max_price, limit, start)
+    cached = _cached(query, max_price, limit, start, ns)
     if cached is not None:
         return [Product(**p) for p in cached]
     try:
@@ -228,7 +228,7 @@ async def search_products(query: str, max_price: Optional[float] = None, limit: 
         ]
         products = _price_aware(products, max_price, limit)
         if products:
-            _store_cache(query, max_price, limit, [p.model_dump() for p in products], start)
+            _store_cache(query, max_price, limit, [p.model_dump() for p in products], start, ns)
         return products
     except Exception as exc:
         print(f"[serpapi] exception for '{query}': {exc!r}", flush=True)
@@ -284,7 +284,7 @@ def _underspends(pool: list[Product], max_price: float | None) -> bool:
 
 
 async def search_deep(item: str, query: str, max_price: Optional[float] = None,
-                      limit: int = 10, category=None) -> list[Product]:
+                      limit: int = 10, category=None, ns: str = "") -> list[Product]:
     """Deep product reach: fetch several query variants (primary, generic item,
     rule-based spec-tier), merge + dedupe, then adaptively expand (page 2 /
     more variants) only when the pool is weak or underspends the budget.
@@ -313,7 +313,7 @@ async def search_deep(item: str, query: str, max_price: Optional[float] = None,
         nonlocal searches
         searches += 1
         try:
-            return await search_products(variant, max_price, limit, start=start)
+            return await search_products(variant, max_price, limit, start=start, ns=ns)
         except Exception:
             return []
 

@@ -10,6 +10,8 @@ services:
         value: "1"
       - key: PRIVA_SERVER_HOST
         value: "0.0.0.0"
+      - key: PRIVA_ADMIN_ADDRESS
+        sync: false
       - key: LINQ_API_KEY
         sync: false
       - key: LINQ_SANDBOX_NUMBER

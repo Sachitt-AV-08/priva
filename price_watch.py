@@ -34,7 +34,7 @@ def _save(data: list):
         pass
 
 
-def add_watch(item: str, price: float, note_id: str = "") -> dict:
+def add_watch(item: str, price: float, note_id: str = "", user_id: str = "local") -> dict:
     watches = _load()
     existing = next((w for w in watches if w["item"].lower() == item.lower() and not w.get("alerted")), None)
     if existing:
@@ -47,6 +47,7 @@ def add_watch(item: str, price: float, note_id: str = "") -> dict:
         "item": item,
         "price": price,
         "note_id": note_id,
+        "user_id": user_id,
         "added_at": int(time.time()),
         "alerted": False,
         "demo_drop_pct": 0.0,
@@ -56,8 +57,11 @@ def add_watch(item: str, price: float, note_id: str = "") -> dict:
     return watch
 
 
-def list_watches() -> list:
-    return _load()
+def list_watches(user_id: str = "") -> list:
+    watches = _load()
+    if user_id:
+        return [w for w in watches if w.get("user_id") == user_id]
+    return watches
 
 
 async def check_watches(address: str = "") -> list:

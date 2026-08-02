@@ -1,10 +1,13 @@
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 import asyncio
 import time
 import json
+import os
+import re
 import urllib.parse
 from collections import deque
 import httpx
@@ -13,7 +16,9 @@ from config import (
     LINQ_WEBHOOK_SECRET, LINQ_API_KEY, PRAVA_PUBLISHABLE_KEY,
     PRAVA_API_URL, SERPAPI_KEY, LINQ_USER_ADDRESS,
     NOTE_OFFER_DELAY, URGENT_OFFER_DELAY, SHIPPING_INTERVAL,
+    DEMO_MODE,
 )
+import users
 from linq_client import (
     send_message, send_shopping_results, send_more_options, send_consent,
     send_confirmation, verify_webhook, outbox as linq_outbox, inbox as linq_inbox,
@@ -56,6 +61,26 @@ conversations: dict[str, dict] = {}
 _agent_activity: deque[dict] = deque(maxlen=60)
 _last_inbound_from: str = ""
 _last_offer_thread: str = ""
+_ADDRESS_OVERRIDE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "user_address_override.json")
+
+
+def _load_address_override() -> str:
+    try:
+        with open(_ADDRESS_OVERRIDE_FILE, encoding="utf-8") as f:
+            return str(json.load(f).get("address", ""))
+    except Exception:
+        return ""
+
+
+def _save_address_override(address: str):
+    try:
+        with open(_ADDRESS_OVERRIDE_FILE, "w", encoding="utf-8") as f:
+            json.dump({"address": address, "saved_at": time.time()}, f)
+    except Exception:
+        pass
+
+
+_user_address_override: str = _load_address_override()
 _webhook_log: deque[dict] = deque(maxlen=120)
 _seen_event_ids: deque[str] = deque(maxlen=200)
 _thread_locks: dict[str, asyncio.Lock] = {}
@@ -75,7 +100,41 @@ def emit_activity(agent: str, message: str, detail: str = "", note_id: str = "")
 
 
 def outgoing_address() -> str:
+    if _user_address_override:
+        return _user_address_override
     return LINQ_USER_ADDRESS or _last_inbound_from or ""
+
+
+_bearer = HTTPBearer(auto_error=False)
+
+
+def current_user(credentials: HTTPAuthorizationCredentials | None = Depends(_bearer)) -> dict:
+    """Resolve the bearer token to a user (defaults to the local SMS-only user)."""
+    if credentials:
+        user = users.user_by_token(credentials.credentials)
+        if user:
+            return user
+    return {"user_id": "local", "name": "", "phone": "", "is_admin": False}
+
+
+def require_admin(user: dict = Depends(current_user)) -> dict:
+    if not user.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return user
+
+
+def user_phone(user: dict) -> str:
+    """The phone PRIVA should text for this user (falls back to the owner address)."""
+    if user.get("user_id") and user["user_id"] != "local":
+        return users.phone_for(user["user_id"])
+    return outgoing_address()
+
+
+def user_thread(user: dict) -> str:
+    """The per-user mirror thread the web/desktop chat polls."""
+    if user.get("user_id") and user["user_id"] != "local":
+        return f"priva_mirror_{user['user_id']}"
+    return "priva_mirror"
 
 @app.get("/health")
 async def health():
@@ -99,9 +158,77 @@ async def api_config():
         "serpapi_configured": bool(SERPAPI_KEY),
     }
 
+@app.post("/api/auth/otp")
+async def api_auth_otp(payload: dict):
+    """Request a login code: {phone, name?}. New phones register on first login.
+
+    DEMO_MODE returns the code inline (no SMS infrastructure needed for
+    judges). Real mode delivers it via Linq SMS.
+    """
+    phone = users.normalize_phone(str(payload.get("phone", "")))
+    if not phone:
+        raise HTTPException(status_code=400, detail="Enter a valid phone number (digits only, country code first)")
+    name = str(payload.get("name", "")).strip()
+    user = users.issue_otp(phone, name)
+    otp = user.get("otp", "")
+    sent = False
+    delivery = "inline"
+    if not DEMO_MODE and LINQ_API_KEY:
+        try:
+            await send_message(phone, f"PRIVA verification code: {otp}", f"otp_{user['user_id']}")
+            sent = True
+            delivery = "sms"
+        except Exception as exc:
+            emit_activity("LINQ", f"OTP SMS to {phone} failed: {exc}")
+    emit_activity("AUTH", f"OTP requested for {phone}")
+    resp = {
+        "ok": True,
+        "user_id": user["user_id"],
+        "delivery": delivery,
+        "sent": sent or DEMO_MODE,
+        "expires_in": users.OTP_TTL,
+    }
+    if DEMO_MODE:
+        resp["otp"] = otp
+    return resp
+
+
+class OtpVerifyIn(BaseModel):
+    phone: str
+    otp: str
+
+
+@app.post("/api/auth/verify")
+async def api_auth_verify(req: OtpVerifyIn):
+    user = users.verify_otp(req.phone, req.otp)
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid or expired code")
+    emit_activity("AUTH", f"{user.get('name') or user['phone']} logged in", "admin" if user.get("is_admin") else "user")
+    return {**users.public_user(user), "token": user.get("token", "")}
+
+
+@app.post("/api/auth/demo-login")
+async def api_auth_demo_login(payload: dict):
+    """DEMO_MODE only: mint a token for an existing user id (QR deep-link flow)."""
+    if not DEMO_MODE:
+        raise HTTPException(status_code=403, detail="DEMO_MODE is off")
+    user = users.mint_token(str(payload.get("user_id", "")))
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    emit_activity("AUTH", f"demo deep-link login: {user.get('name') or user['phone']}")
+    return {**users.public_user(user), "token": user["token"]}
+
+
+@app.get("/api/auth/me")
+async def api_auth_me(user: dict = Depends(current_user)):
+    if user.get("user_id") == "local":
+        return {"user": None, "authenticated": False}
+    return {"user": users.public_user(user), "authenticated": True}
+
+
 @app.get("/api/transactions")
-async def list_transactions(user_id: str = ""):
-    return {"transactions": get_transactions(user_id)}
+async def list_transactions(user: dict = Depends(current_user)):
+    return {"transactions": get_transactions(user["user_id"])}
 
 @app.post("/api/transactions/{txn_id}/status")
 async def update_txn_status(txn_id: str, status: str):
@@ -132,13 +259,15 @@ async def _shipping_worker():
                 update_transaction(txn["id"], shipping_status=nxt)
                 emit_activity("DELIVERY", f"order {nxt.replace('_', ' ')}", txn["id"], note_id=txn.get("note_id", ""))
                 if nxt == "delivered":
-                    address = txn.get("user_id") or outgoing_address()
+                    uid = txn.get("user_id", "")
+                    address = users.phone_for(uid) or outgoing_address()
                     if address:
+                        thread_id = f"priva_mirror_{uid}" if users.user_by_id(uid) else "priva_mirror"
                         try:
                             await send_message(
                                 address,
                                 f"Your {txn.get('product_title', 'order')} was delivered. Enjoy!",
-                                "priva_mirror",
+                                thread_id,
                             )
                         except Exception:
                             pass
@@ -203,8 +332,8 @@ class PayRequest(BaseModel):
     budget_excess: float | None = None
 
 @app.post("/api/search")
-async def api_search(req: SearchRequest):
-    products = await search_products(req.query, req.max_price, req.limit)
+async def api_search(req: SearchRequest, user: dict = Depends(current_user)):
+    products = await search_products(req.query, req.max_price, req.limit, ns=user["user_id"])
     return {"products": [p.model_dump() for p in products]}
 
 @app.post("/api/pay")
@@ -263,9 +392,11 @@ async def api_pay_complete(req: PayCompleteRequest):
         if status == "completed":
             txn = next((t for t in get_transactions() if t["id"] == req.transaction_id), None)
             if txn:
+                txn_uid = txn.get("user_id", "local")
                 spending_store.record_purchase(
                     txn.get("product_title", ""), txn.get("merchant", ""),
                     float(txn.get("amount", 0) or 0), req.transaction_id,
+                    user_id=txn_uid,
                 )
                 if req.budget_excess:
                     spending_store.record_borrow(req.budget_excess)
@@ -296,8 +427,28 @@ async def api_linq_address():
 
 
 @app.get("/api/linq/transcript")
-async def api_linq_transcript(thread_id: str = ""):
+async def api_linq_transcript(thread_id: str = "", user: dict = Depends(current_user)):
+    if user.get("user_id") != "local" and not user.get("is_admin"):
+        thread_id = user_thread(user)
     return {"messages": linq_outbox(thread_id), "inbound": linq_inbox(thread_id)}
+
+
+class LinqSendIn(BaseModel):
+    text: str
+    thread_id: str = ""
+
+
+@app.post("/api/linq/send")
+async def api_linq_send(req: LinqSendIn, user: dict = Depends(current_user)):
+    """Send an SMS from the web/desktop chat (real phone delivery via Linq)."""
+    to = user_phone(user)
+    if not to:
+        raise HTTPException(status_code=400, detail="No SMS destination configured")
+    thread_id = user_thread(user) if user["user_id"] != "local" else (req.thread_id or "priva_mirror")
+    result = await send_message(to, req.text, thread_id)
+    error = result.get("error") if isinstance(result, dict) else None
+    emit_activity("LINQ", "web chat -> SMS", req.text[:60])
+    return {"ok": True, "sent": not error, "error": error, "thread_id": thread_id}
 
 
 @app.delete("/api/linq/transcript")
@@ -347,27 +498,31 @@ class NoteIn(BaseModel):
 
 
 @app.get("/api/notes")
-async def api_notes():
-    return {"notes": list_notes()}
+async def api_notes(user: dict = Depends(current_user)):
+    return {"notes": list_notes(user["user_id"])}
 
 
 @app.post("/api/notes")
-async def api_note_create(note: NoteIn):
-    stored = save_note(note.model_dump())
+async def api_note_create(note: NoteIn, user: dict = Depends(current_user)):
+    stored = save_note(note.model_dump(), user["user_id"])
     emit_activity("NOTES", f"note saved: {note.title or 'untitled'}", note_id=stored["id"])
     _schedule_note_offer(stored)
     return {"note": stored}
 
 
 @app.put("/api/notes/{note_id}")
-async def api_note_update(note_id: str, note: NoteIn):
-    stored = save_note({**note.model_dump(), "id": note_id})
+async def api_note_update(note_id: str, note: NoteIn, user: dict = Depends(current_user)):
+    if not get_note(note_id, user["user_id"]):
+        raise HTTPException(status_code=404, detail="Note not found")
+    stored = save_note({**note.model_dump(), "id": note_id}, user["user_id"])
     _schedule_note_offer(stored)
     return {"note": stored}
 
 
 @app.delete("/api/notes/{note_id}")
-async def api_note_delete(note_id: str):
+async def api_note_delete(note_id: str, user: dict = Depends(current_user)):
+    if not get_note(note_id, user["user_id"]):
+        raise HTTPException(status_code=404, detail="Note not found")
     task = _offer_tasks.pop(note_id, None)
     if task and not task.done():
         task.cancel()
@@ -375,13 +530,51 @@ async def api_note_delete(note_id: str):
 
 
 @app.get("/api/notes/analyze")
-async def api_note_analyze(note_id: str = ""):
+async def api_note_analyze(note_id: str = "", user: dict = Depends(current_user)):
     if note_id:
-        note = get_note(note_id)
+        note = get_note(note_id, user["user_id"])
         if not note:
             raise HTTPException(status_code=404, detail="Note not found")
         return analyze_note(note)
-    return {"notes": [{"id": n["id"], **analyze_note(n)} for n in list_notes()]}  
+    return {"notes": [{"id": n["id"], **analyze_note(n)} for n in list_notes(user["user_id"])]}  
+
+
+@app.post("/api/notes/analyze-text")
+async def api_note_analyze_text(note: NoteIn):
+    """Analyze arbitrary note text (used by the public web demo)."""
+    return await analyze_note_llm(note.model_dump())
+
+
+@app.get("/api/demo/register-phone")
+async def api_demo_register_status():
+    return {
+        "registered": bool(_user_address_override),
+        "address": _user_address_override,
+        "config_address": LINQ_USER_ADDRESS,
+        "effective": outgoing_address(),
+    }
+
+
+@app.post("/api/demo/register-phone")
+async def api_demo_register_phone(payload: dict):
+    phone = str(payload.get("phone", "")).strip()
+    if not phone:
+        raise HTTPException(status_code=400, detail="phone is required")
+    digits = re.sub(r"\D", "", phone)
+    if not re.match(r"^[1-9]\d{7,14}$", digits):
+        raise HTTPException(status_code=400, detail="Enter a valid phone number (digits only, country code first)")
+    normalized = "+" + digits
+    users.get_or_create(normalized)
+    global _user_address_override
+    _user_address_override = normalized
+    _save_address_override(normalized)
+    emit_activity("LINQ", f"test number registered: {normalized}")
+    if payload.get("send_test"):
+        try:
+            send_message(normalized, "PRIVA connected \u2014 I'll text you when your notes need shopping or reminders. Reply anything to chat.")
+        except Exception as exc:
+            emit_activity("LINQ", f"test SMS to {normalized} failed: {exc}")
+    return {"ok": True, "registered": True, "address": normalized, "effective": outgoing_address()}
 
 
 @app.get("/api/linq/webhook-log")
@@ -457,7 +650,8 @@ async def _maybe_offer_from_note(note: dict, urgent: bool = False):
     buy_intents = analysis.get("buy_intents", [])
     if not buy_intents:
         return
-    address = outgoing_address()
+    note_user = note.get("user_id", "local")
+    address = users.phone_for(note_user) or outgoing_address()
     if not address:
         emit_activity("LINQ", "buy intent detected — no address configured", note["id"], note_id=note["id"])
         return
@@ -491,6 +685,7 @@ async def _maybe_offer_from_note(note: dict, urgent: bool = False):
         "prefs": prefs,
         "note_id": note["id"],
         "from": address,
+        "user_id": note_user,
     }
     pref_txt = ""
     if prefs.get("color") or prefs.get("size"):
@@ -506,17 +701,24 @@ async def _maybe_offer_from_note(note: dict, urgent: bool = False):
         f"Want me to find the best options? Reply YES to search, or NO to skip."
     )
     emit_activity("NOTE ANALYZER", f"saw buy intent: {item}" + hint, note_id=note["id"])
+    before = len(linq_outbox())
     result = await send_message(address, text, thread_id)
     if isinstance(result, dict) and result.get("error"):
         emit_activity("LINQ", "send failed", str(result.get("error"))[:120], note_id=note["id"])
         return
+    if note_user not in ("", "local"):
+        mirror = f"priva_mirror_{note_user}"
+        if mirror != thread_id:
+            for entry in linq_outbox()[before:]:
+                if entry.get("thread_id") == thread_id:
+                    record_outbound_for(entry, mirror)
     mark_offered(note["id"], item, thread_id)
     emit_activity("LINQ", "texted you on iMessage", text[:60], note_id=note["id"])
 
 
 @app.get("/api/reminders")
-async def api_reminders(include_fired: bool = False):
-    return {"reminders": list_reminders(include_fired)}
+async def api_reminders(include_fired: bool = False, user: dict = Depends(current_user)):
+    return {"reminders": list_reminders(include_fired, user["user_id"])}
 
 
 class ReminderIn(BaseModel):
@@ -526,8 +728,11 @@ class ReminderIn(BaseModel):
 
 
 @app.post("/api/reminders")
-async def api_reminder_create(reminder: ReminderIn):
-    created = add_reminder(reminder.text, reminder.due_at, reminder.note_id)
+async def api_reminder_create(reminder: ReminderIn, user: dict = Depends(current_user)):
+    created = add_reminder(
+        reminder.text, reminder.due_at, reminder.note_id,
+        user_id=user["user_id"], address=user_phone(user),
+    )
     emit_activity("REMINDER", f"set for {time.strftime('%a %H:%M', time.localtime(created['due_at']))}", reminder.text[:60], note_id=created.get("note_id", ""))
     return {"reminder": created}
 
@@ -543,17 +748,20 @@ class SimulateReply(BaseModel):
 
 
 @app.post("/api/linq/simulate-reply")
-async def api_simulate_reply(req: SimulateReply):
+async def api_simulate_reply(req: SimulateReply, user: dict = Depends(current_user)):
     """In-app mirror of an inbound iMessage reply — same conversation machine."""
-    from_ = outgoing_address() or "priva_user"
-    thread_id = req.thread_id or "priva_mirror"
+    from_ = user_phone(user) or "priva_user"
+    if user["user_id"] != "local":
+        thread_id = user_thread(user)
+    else:
+        thread_id = req.thread_id or "priva_mirror"
     result = await route_inbound(from_, req.text, thread_id)
     return {"ok": True, "result": result}
 
 
 @app.get("/api/watchlist")
-async def api_watchlist():
-    return {"watches": list_watches()}
+async def api_watchlist(user: dict = Depends(current_user)):
+    return {"watches": list_watches(user["user_id"])}
 
 
 class DemoDrop(BaseModel):
@@ -690,17 +898,23 @@ async def route_inbound(from_: str, text: str, thread_id: str):
         if is_short_reply and last in conversations and conversations[last].get("step") in ("note_offer", "asking_prefs", "showing_results"):
             mirror_to = thread_id
             thread_id = last
+    user = users.user_by_phone(from_)
+    user_thread = f"priva_mirror_{user['user_id']}" if user else ""
     record_inbound(from_, text, thread_id)
     if mirror_to and mirror_to != thread_id:
         record_inbound(from_, text, mirror_to)
-    before = len(linq_outbox()) if mirror_to else 0
+    if user_thread and user_thread != thread_id and user_thread != mirror_to:
+        record_inbound(from_, text, user_thread)
+    before = len(linq_outbox())
     try:
         result = await _handle_inbound(from_, text, thread_id)
     finally:
-        if mirror_to and mirror_to != thread_id:
-            for entry in linq_outbox()[before:]:
-                if entry.get("thread_id") == thread_id:
+        for entry in linq_outbox()[before:]:
+            if entry.get("thread_id") == thread_id:
+                if mirror_to and mirror_to != thread_id:
                     record_outbound_for(entry, mirror_to)
+                if user_thread and user_thread != thread_id and user_thread != mirror_to:
+                    record_outbound_for(entry, user_thread)
     return result
 
 
@@ -907,7 +1121,7 @@ async def schedule_followup(conv: dict):
     item = conv.get("pending_item", "")
     if not item:
         return
-    for existing in list_reminders(include_fired=False):
+    for existing in list_reminders(include_fired=False, user_id=conv.get("user_id", "local")):
         if existing.get("note_id") == conv.get("note_id", "") or item.lower() in existing.get("text", "").lower():
             cancel_reminder(existing["id"])
     due = int(time.time()) + 60 * 45
@@ -915,6 +1129,8 @@ async def schedule_followup(conv: dict):
         f"Still want to buy {item}? Reply BUY NOW to checkout instantly.",
         due,
         note_id=conv.get("note_id", ""),
+        user_id=conv.get("user_id", "local"),
+        address=conv.get("from", ""),
     )
     emit_activity("REMINDER", f"follow-up scheduled for {item}", "in 45 min", note_id=conv.get("note_id", ""))
 
@@ -1021,7 +1237,8 @@ async def _check_payment_status(thread_id: str, from_: str, conv: dict):
             update_transaction(txn_id, status="completed", prava_status=final.get("prava_status", ""))
             eta = time.strftime("%a %b %d", time.localtime(time.time() + 3 * 86400))
             update_transaction(txn_id, shipping_status="confirmed", shipping_eta=eta)
-            spending_store.record_purchase(txn.get("product_title", ""), txn.get("merchant", ""), float(txn.get("amount", 0) or 0), txn_id)
+            txn_uid = txn.get("user_id", "local")
+            spending_store.record_purchase(txn.get("product_title", ""), txn.get("merchant", ""), float(txn.get("amount", 0) or 0), txn_id, user_id=txn_uid)
             excess = conv.get("budget_excess")
             if excess:
                 spending_store.record_borrow(excess)
@@ -1062,8 +1279,10 @@ async def _create_payment_flow(thread_id: str, from_: str, product: dict) -> str
     session_id = result.get("session_id", "")
     payment_url = result.get("payment_url", "")
     note_id = (conversations.get(thread_id, {}) or {}).get("note_id", "")
-    txn = log_transaction(from_, Product(**product), session_id, note_id=note_id)
-    add_watch(product.get("title", ""), float(product.get("price", 0) or 0), note_id=note_id)
+    conv_user = (conversations.get(thread_id, {}) or {}).get("user_id", "")
+    uid = conv_user or (users.user_by_phone(from_) or {}).get("user_id") or from_
+    txn = log_transaction(uid, Product(**product), session_id, note_id=note_id)
+    add_watch(product.get("title", ""), float(product.get("price", 0) or 0), note_id=note_id, user_id=uid if uid.startswith("u_") else "local")
     emit_activity("PRAVA", "payment session live", session_id[:24], note_id=note_id)
     conv = conversations.get(thread_id, {})
     if payment_url:
@@ -1133,7 +1352,8 @@ async def handle_choice(from_: str, text: str, thread_id: str):
             await schedule_followup(conv)
             product = conv.get("selected_product", {})
             if product:
-                add_watch(product.get("title", ""), float(product.get("price", 0) or 0), note_id=conv.get("note_id", ""))
+                add_watch(product.get("title", ""), float(product.get("price", 0) or 0),
+                          note_id=conv.get("note_id", ""), user_id=conv.get("user_id", "local"))
                 emit_activity("PRICE WATCH", f"watching {product.get('title', '')}", "declined", note_id=conv.get("note_id", ""))
             await send_message(from_, "Purchase cancelled — I'll check back with you later. Anything else?", thread_id)
             conversations.pop(thread_id, None)
@@ -1215,15 +1435,17 @@ async def _poll_payment_and_notify(thread_id: str, address: str, session_id: str
             result = await complete_payment(session_id, amount)
             if result.get("status") == "completed":
                 update_transaction(txn_id, status="completed", prava_status=result.get("prava_status", ""))
-                spending_store.record_purchase(product.get("title", ""), product.get("merchant", ""), float(product.get("price", 0) or 0), txn_id)
                 _conv = conversations.get(thread_id, {}) or {}
                 _excess = _conv.get("budget_excess")
+                txn_uid = _conv.get("user_id") or (users.user_by_phone(address) or {}).get("user_id") or "local"
+                spending_store.record_purchase(product.get("title", ""), product.get("merchant", ""), float(product.get("price", 0) or 0), txn_id, user_id=txn_uid)
                 if _excess:
                     spending_store.record_borrow(_excess)
                     emit_activity("BUDGET", "borrowed from next month", f"${_excess:.2f}")
                 emit_activity("PRAVA", "payment APPROVED", session_id[:24], note_id=_conv.get("note_id", ""))
                 emit_activity("PAID", f"{product.get('title', '')} paid", f"${product.get('price', 0)}", note_id=_conv.get("note_id", ""))
-                add_watch(product.get("title", ""), float(product.get("price", 0) or 0))
+                add_watch(product.get("title", ""), float(product.get("price", 0) or 0),
+                          user_id=txn_uid if txn_uid.startswith("u_") else "local")
                 eta = time.strftime("%a %b %d", time.localtime(time.time() + 3 * 86400))
                 update_transaction(txn_id, shipping_status="confirmed", shipping_eta=eta)
                 await send_confirmation(
@@ -1255,6 +1477,37 @@ async def _poll_payment_and_notify(thread_id: str, address: str, session_id: str
             "Payment session is still waiting. Reply STATUS to check, or RETRY to create a new one.",
             thread_id,
         )
+
+
+@app.get("/api/admin/users")
+async def api_admin_users(admin: dict = Depends(require_admin)):
+    out = []
+    for u in users.list_users():
+        uid = u["user_id"]
+        thread = f"priva_mirror_{uid}"
+        out.append({
+            **users.public_user(u),
+            "notes": len(list_notes(uid)),
+            "transactions": len(get_transactions(uid)),
+            "messages": len(linq_outbox(thread)) + len(linq_inbox(thread)),
+        })
+    return {"users": out}
+
+
+@app.get("/api/admin/users/{user_id}/transcript")
+async def api_admin_user_transcript(user_id: str, admin: dict = Depends(require_admin)):
+    thread = f"priva_mirror_{user_id}"
+    user = users.user_by_id(user_id)
+    return {
+        "user": users.public_user(user) if user else None,
+        "messages": linq_outbox(thread),
+        "inbound": linq_inbox(thread),
+    }
+
+
+@app.get("/api/admin/activity")
+async def api_admin_activity(admin: dict = Depends(require_admin)):
+    return {"events": list(_agent_activity)}
 
 
 @app.on_event("startup")

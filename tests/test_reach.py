@@ -228,7 +228,7 @@ def test_search_deep_merges_and_dedupes(monkeypatch):
     import serpapi_client as sc
     calls = []
 
-    async def fake_search(query, max_price=None, limit=5, start=0):
+    async def fake_search(query, max_price=None, limit=5, start=0, ns=""):
         calls.append((query, start))
         if query == "running shoes":
             return [_p("1", "Shoe A", 60.0), _p("2", "Shoe B", 70.0)]
@@ -249,7 +249,7 @@ def test_search_deep_expands_when_underspending(monkeypatch):
     import serpapi_client as sc
     calls = []
 
-    async def fake_search(query, max_price=None, limit=5, start=0):
+    async def fake_search(query, max_price=None, limit=5, start=0, ns=""):
         calls.append((query, start))
         return [_p(f"p{start + i}", "Laptop", 100 + start + i) for i in range(2)]
 
@@ -264,7 +264,7 @@ def test_search_deep_no_expansion_on_good_pool(monkeypatch):
     import serpapi_client as sc
     calls = []
 
-    async def fake_search(query, max_price=None, limit=5, start=0):
+    async def fake_search(query, max_price=None, limit=5, start=0, ns=""):
         calls.append((query, start))
         return [_p(f"p{i}", "Laptop", 1500 + i * 50) for i in range(10)]
 

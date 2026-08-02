@@ -233,7 +233,7 @@ def test_handle_choice_no_cancels_and_watches(monkeypatch, tmp_path):
     async def fake_flow(thread_id, from_, product):
         raise AssertionError("payment flow must not run on NO")
     monkeypatch.setattr(srv, "_create_payment_flow", fake_flow)
-    monkeypatch.setattr(srv, "add_watch", lambda title, price, note_id="": watched.append((title, price, note_id)))
+    monkeypatch.setattr(srv, "add_watch", lambda title, price, note_id="", **kw: watched.append((title, price, note_id)))
     monkeypatch.setattr(srv, "conversations", {
         "thr2": {
             "step": "awaiting_consent",

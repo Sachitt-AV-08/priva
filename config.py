@@ -11,6 +11,10 @@ LINQ_WEBHOOK_SECRET = os.getenv("LINQ_WEBHOOK_SECRET", "")
 LINQ_SANDBOX_NUMBER = os.getenv("LINQ_SANDBOX_NUMBER", "")
 LINQ_USER_ADDRESS = os.getenv("LINQ_USER_ADDRESS", "")
 
+# Owner's phone: logging in with this number makes the account an admin
+# (auto-unlocks /admin in the web app).
+PRIVA_ADMIN_ADDRESS = os.getenv("PRIVA_ADMIN_ADDRESS", "")
+
 SERPAPI_KEY = os.getenv("SERPAPI_KEY", "")
 
 PRAVA_SECRET_KEY = os.getenv("PRAVA_SECRET_KEY", "")

@@ -6,7 +6,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Sachitt-AV-08/AUDIT.git"
+    "url": "https://github.com/Sachitt-AV-08/priva.git"
   },
   "keywords": [
     "priva",
@@ -23,7 +23,7 @@
     "preview": "vite preview",
     "electron:dev": "vite",
     "electron:build": "vite build",
-    "package": "electron-builder --win portable --config electron-builder.yml"
+    "package": "electron-builder --win --config electron-builder.yml"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.1.0",

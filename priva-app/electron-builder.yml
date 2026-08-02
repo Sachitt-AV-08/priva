@@ -1,0 +1,19 @@
+appId: com.priva.agent
+productName: PRIVA
+copyright: Copyright © 2026 PRIVA
+directories:
+  output: release
+files:
+  - dist/**
+  - dist-electron/**
+  - package.json
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+nsis:
+  artifactName: PRIVA-Setup-${version}.exe
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+npmRebuild: false

@@ -262,6 +262,12 @@ def update_transaction(txn_id: str, **kwargs):
             break
 
 def get_transactions(user_id: str = "") -> list[dict]:
+    if user_id == "local":
+        # The local SMS-only user: transactions recorded with a phone, or no uid.
+        return [
+            t.model_dump() for t in transaction_log
+            if not t.user_id or t.user_id == "local" or t.user_id.startswith("+")
+        ]
     if user_id:
         return [t.model_dump() for t in transaction_log if t.user_id == user_id]
     return [t.model_dump() for t in transaction_log]

@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       api_base:
-        description: "Backend API base URL to bake in (VITE_API_BASE)"
+        description: "Backend API base URL to bake in (NEXT_PUBLIC_PRIVA_API)"
         required: false
         default: ""
 
@@ -28,16 +28,16 @@ jobs:
         with:
           node-version: 20
           cache: npm
-          cache-dependency-path: priva-app/package-lock.json
+          cache-dependency-path: priva-site/package-lock.json
       - run: npm ci
-        working-directory: priva-app
+        working-directory: priva-site
       - run: npm run build
-        working-directory: priva-app
+        working-directory: priva-site
         env:
-          VITE_API_BASE: ${{ inputs.api_base }}
+          NEXT_PUBLIC_PRIVA_API: ${{ inputs.api_base }}
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: priva-app/dist
+          path: priva-site/out
 
   deploy:
     needs: build

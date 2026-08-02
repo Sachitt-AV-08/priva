@@ -104,19 +104,24 @@ def effective_limit(ts: Optional[int] = None) -> Optional[float]:
     return round(limit - borrowed_from_prev(ts), 2)
 
 
-def purchases(month: Optional[str] = None) -> list:
+def purchases(month: Optional[str] = None, user_id: str = "") -> list:
     data = _load()
     target = month or _month()
-    return [p for p in data.get("purchases", []) if _month(p.get("ts", 0)) == target]
+    out = [p for p in data.get("purchases", []) if _month(p.get("ts", 0)) == target]
+    if user_id:
+        out = [p for p in out if p.get("user_id") == user_id]
+    return out
 
 
-def record_purchase(title: str, merchant: str, amount: float, txn_id: str = "") -> dict:
+def record_purchase(title: str, merchant: str, amount: float, txn_id: str = "",
+                    user_id: str = "local") -> dict:
     entry = {
         "ts": int(time.time()),
         "title": title,
         "merchant": merchant,
         "amount": float(amount),
         "txn_id": txn_id,
+        "user_id": user_id,
     }
     data = _load()
     data.setdefault("purchases", []).append(entry)

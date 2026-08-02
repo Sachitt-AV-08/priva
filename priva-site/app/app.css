@@ -1,0 +1,269 @@
+/* ---- app area (dashboard / shop / login / admin) ---- */
+
+.app-area {
+  max-width: 1080px;
+}
+
+.nav .on {
+  color: var(--accent);
+  border-bottom: 2px solid var(--accent);
+  padding-bottom: 2px;
+}
+
+.nav-user {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.small-btn {
+  font-size: 12px;
+  padding: 4px 10px;
+}
+
+.page-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.grid.two {
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 14px;
+}
+
+.note-row {
+  border: 1px solid var(--line, #ffffff22);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin: 8px 0;
+}
+
+.tiny {
+  font-size: 11px;
+  opacity: 0.65;
+}
+
+.login-wrap {
+  display: flex;
+  justify-content: center;
+  padding: 48px 16px;
+}
+
+.login-card {
+  width: 100%;
+  max-width: 440px;
+  padding: 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.login-card.center {
+  text-align: center;
+}
+
+.phone-input {
+  width: 100%;
+  padding: 11px 14px;
+  border-radius: 10px;
+  border: 1px solid #ffffff2e;
+  background: #0d1220;
+  color: #e8ecf7;
+  font-size: 15px;
+}
+
+.phone-input.grow {
+  flex: 1;
+}
+
+.phone-input.short {
+  width: 110px;
+}
+
+.btn-row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.field-label {
+  font-size: 12px;
+  color: var(--muted, #9aa4bd);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.ok {
+  color: #5ce08a;
+  font-size: 14px;
+}
+
+.err {
+  color: #ff7a7a;
+  font-size: 14px;
+}
+
+.warn {
+  border: 1px solid #e0a13a66;
+  background: #1d1a10;
+}
+
+.warn-tag {
+  background: #8a5a1a;
+  color: #ffd9a0;
+}
+
+/* chat */
+
+.chat {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.chat-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.chat-box {
+  height: 340px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid #ffffff1c;
+  border-radius: 12px;
+  background: #0a0f1b;
+}
+
+.bubble {
+  max-width: 78%;
+  padding: 9px 12px;
+  border-radius: 14px;
+  font-size: 14px;
+  line-height: 1.4;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.bubble.out {
+  align-self: flex-end;
+  background: var(--accent);
+  color: #06121f;
+  border-bottom-right-radius: 4px;
+}
+
+.bubble.in {
+  align-self: flex-start;
+  background: #1c2438;
+  color: #dfe6f5;
+  border-bottom-left-radius: 4px;
+}
+
+.bubble-time {
+  font-size: 10px;
+  opacity: 0.6;
+  text-align: right;
+}
+
+.chat-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.chat-input {
+  flex: 1;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid #ffffff2e;
+  background: #0d1220;
+  color: #e8ecf7;
+  font-size: 14px;
+}
+
+/* shop */
+
+.product-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 14px;
+  margin-top: 16px;
+}
+
+.product {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.product-img {
+  width: 100%;
+  height: 140px;
+  object-fit: cover;
+  border-radius: 10px;
+  background: #0d1220;
+}
+
+.product-img.placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 40px;
+}
+
+.price {
+  font-size: 17px;
+  color: var(--accent);
+}
+
+.big-price {
+  font-size: 26px;
+}
+
+/* admin */
+
+.admin-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.admin-table th,
+.admin-table td {
+  text-align: left;
+  padding: 8px 6px;
+  border-bottom: 1px solid #ffffff14;
+}
+
+.admin-table tr {
+  cursor: pointer;
+}
+
+.admin-table tr:hover,
+.admin-table tr.sel {
+  background: #ffffff0c;
+}
+
+.feed {
+  max-height: 380px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.feed-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  border-bottom: 1px solid #ffffff0d;
+  padding-bottom: 6px;
+}
