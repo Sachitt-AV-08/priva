@@ -40,14 +40,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
     apiFetch("/api/auth/me")
       .then(async (res) => {
-        if (!res.ok) throw new Error("bad token");
+        if (res.status === 401 || res.status === 403) {
+          window.localStorage.removeItem("priva_token");
+          throw new Error("bad token");
+        }
+        if (!res.ok) throw new Error("backend error");
         const body = await res.json();
-        if (!body.authenticated) throw new Error("bad token");
+        if (!body.authenticated) {
+          window.localStorage.removeItem("priva_token");
+          throw new Error("bad token");
+        }
         setToken(t);
         setUser(body.user);
       })
       .catch(() => {
-        window.localStorage.removeItem("priva_token");
+        /* network blip — keep the token so the session survives */
       })
       .finally(() => setLoading(false));
   }, []);

@@ -1,32 +1,52 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { Activity as ActivityIcon, MessageSquare, ShieldCheck, Users } from "lucide-react";
 import { useRouter } from "next/navigation";
 import AppShell from "../../components/AppShell";
+import Spinner from "../../components/Spinner";
 import { useAuth } from "../../lib/auth";
-import { apiFetch } from "../../lib/constants";
+import { apiFetch } from "../../lib/backend";
 
 type AdminUser = {
   user_id: string;
-  name: string;
-  phone: string;
-  is_admin: boolean;
-  last_active: number;
-  created_at: number;
-  notes: number;
-  transactions: number;
-  messages: number;
+  name?: string;
+  phone?: string;
+  is_admin?: boolean;
+  created_at?: number;
+  last_active?: number;
+  notes?: number;
+  transactions?: number;
+  messages?: number;
 };
+type ActivityEvent = {
+  agent?: string;
+  text?: string;
+  message?: string;
+  detail?: string;
+  note_id?: string;
+  ts?: number;
+};
+type Message = { text: string; ts: number; thread_id?: string };
+type Thread = { messages?: Message[]; inbound?: Message[] };
 
-type Activity = { agent: string; message: string; detail: string; ts: number };
+function formatTime(timestamp?: number) {
+  if (!timestamp) return "—";
+  return new Date(timestamp * 1000).toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
 
 export default function AdminPage() {
   const { user, loading } = useAuth();
   const router = useRouter();
   const [users, setUsers] = useState<AdminUser[]>([]);
-  const [activity, setActivity] = useState<Activity[]>([]);
+  const [activity, setActivity] = useState<ActivityEvent[]>([]);
   const [selected, setSelected] = useState<AdminUser | null>(null);
-  const [thread, setThread] = useState<{ messages: any[]; inbound: any[] } | null>(null);
+  const [thread, setThread] = useState<Thread | null>(null);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -39,62 +59,93 @@ export default function AdminPage() {
   useEffect(() => {
     if (!user?.is_admin) return;
     let alive = true;
-    const load = () =>
-      Promise.all([
-        apiFetch("/api/admin/users").then(async (r) => (r.ok ? r.json() : null)),
-        apiFetch("/api/admin/activity").then(async (r) => (r.ok ? r.json() : null)),
-      ])
-        .then(([u, a]) => {
-          if (!alive) return;
-          if (u) setUsers(u.users || []);
-          if (a) setActivity(a.events || []);
-        })
-        .catch((e) => setError(e instanceof Error ? e.message : "Backend unreachable"));
+    const load = async () => {
+      try {
+        const [usersResponse, activityResponse] = await Promise.all([
+          apiFetch("/api/admin/users"),
+          apiFetch("/api/admin/activity"),
+        ]);
+        if (!alive) return;
+        if (usersResponse.ok) setUsers((await usersResponse.json()).users || []);
+        if (activityResponse.ok) setActivity((await activityResponse.json()).events || []);
+        setError("");
+      } catch (reason) {
+        if (alive) setError(reason instanceof Error ? reason.message : "Admin data is reconnecting");
+      }
+    };
     load();
-    const t = window.setInterval(load, 3000);
+    const timer = window.setInterval(load, 3000);
     return () => {
       alive = false;
-      window.clearInterval(t);
+      window.clearInterval(timer);
     };
   }, [user?.is_admin]);
 
   useEffect(() => {
-    if (!selected) return;
+    if (!selected) {
+      setThread(null);
+      return;
+    }
     let alive = true;
-    const load = () =>
-      apiFetch(`/api/admin/users/${selected.user_id}/transcript`)
-        .then(async (r) => {
-          if (r.ok && alive) setThread(await r.json());
-        })
-        .catch(() => {});
+    const load = async () => {
+      try {
+        const response = await apiFetch(`/api/admin/users/${encodeURIComponent(selected.user_id)}/transcript`);
+        if (response.ok && alive) setThread(await response.json());
+      } catch {
+        // Retain the last transcript during reconnects.
+      }
+    };
     load();
-    const t = window.setInterval(load, 3000);
+    const timer = window.setInterval(load, 3000);
     return () => {
       alive = false;
-      window.clearInterval(t);
+      window.clearInterval(timer);
     };
   }, [selected]);
 
-  if (loading || !user || !user.is_admin) return <p className="dim">Loading…</p>;
+  const messages = useMemo(() => [
+    ...(thread?.inbound || []).map((message) => ({ ...message, direction: "in" as const })),
+    ...(thread?.messages || []).map((message) => ({ ...message, direction: "out" as const })),
+  ].sort((a, b) => a.ts - b.ts), [thread]);
 
-  const rows = [
-    ...(thread?.inbound || []).map((m) => ({ dir: "in", text: m.text, ts: m.ts })),
-    ...(thread?.messages || []).map((m) => ({ dir: "out", text: m.text, ts: m.ts })),
-  ].sort((a, b) => a.ts - b.ts);
+  if (loading || !user || !user.is_admin) {
+    return <main className="loading-page"><Spinner /></main>;
+  }
+
+  const noteCount = users.reduce((sum, item) => sum + Number(item.notes || 0), 0);
+  const orderCount = users.reduce((sum, item) => sum + Number(item.transactions || 0), 0);
 
   return (
     <AppShell>
-      <section className="section">
-        <h2>🔐 Owner console</h2>
-        <p className="dim small">
-          Every user has a real phone number, a real SMS thread, and a mirror chat that shows on
-          their website + desktop app. This console sees all of them.
-        </p>
+      <header className="page-head">
+        <div>
+          <p className="page-kicker">Private operations</p>
+          <h1>Owner Console</h1>
+          <p className="page-description">Users, agent activity, and mirrored SMS threads in one considered view.</p>
+        </div>
+        <span className="badge"><ShieldCheck size={13} aria-hidden="true" /> Admin access</span>
+      </header>
 
-        <div className="grid two">
-          <div className="card">
-            <h3>Users ({users.length})</h3>
-            {error && <p className="err">{error}</p>}
+      <div className="admin-stats">
+        <section className="card stat">
+          <p className="stat-label"><Users size={12} aria-hidden="true" /> Users</p>
+          <p className="stat-value">{users.length}</p>
+        </section>
+        <section className="card stat">
+          <p className="stat-label">Notes</p>
+          <p className="stat-value">{noteCount}</p>
+        </section>
+        <section className="card stat">
+          <p className="stat-label">Orders</p>
+          <p className="stat-value">{orderCount}</p>
+        </section>
+      </div>
+
+      <div className="admin-grid">
+        <section className="card admin-panel">
+          <h2>People</h2>
+          {error && <p className="err small" role="alert">{error}</p>}
+          <div className="table-scroll">
             <table className="admin-table">
               <thead>
                 <tr>
@@ -102,65 +153,83 @@ export default function AdminPage() {
                   <th>Phone</th>
                   <th>Notes</th>
                   <th>Orders</th>
-                  <th>Msgs</th>
-                  <th>Active</th>
+                  <th>Messages</th>
+                  <th>Last active</th>
                 </tr>
               </thead>
               <tbody>
-                {users.map((u) => (
+                {users.map((item) => (
                   <tr
-                    key={u.user_id}
-                    className={selected?.user_id === u.user_id ? "sel" : ""}
-                    onClick={() => setSelected(u)}
+                    className={selected?.user_id === item.user_id ? "sel" : ""}
+                    key={item.user_id}
+                    tabIndex={0}
+                    aria-selected={selected?.user_id === item.user_id}
+                    onClick={() => {
+                      setThread(null);
+                      setSelected(item);
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        setThread(null);
+                        setSelected(item);
+                      }
+                    }}
                   >
                     <td>
-                      {u.name || "—"} {u.is_admin && <b className="tag">owner</b>}
+                      {item.name || "Unnamed"}
+                      {item.is_admin && <span className="badge admin-owner">owner</span>}
                     </td>
-                    <td className="dim">{u.phone}</td>
-                    <td>{u.notes}</td>
-                    <td>{u.transactions}</td>
-                    <td>{u.messages}</td>
-                    <td className="dim tiny">
-                      {u.last_active ? new Date(u.last_active * 1000).toLocaleString() : "—"}
-                    </td>
+                    <td className="mono muted">{item.phone || "—"}</td>
+                    <td className="admin-number">{item.notes || 0}</td>
+                    <td className="admin-number">{item.transactions || 0}</td>
+                    <td className="admin-number">{item.messages || 0}</td>
+                    <td className="muted tiny">{formatTime(item.last_active)}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
+          {users.length === 0 && <div className="empty-state">No users are available yet.</div>}
+        </section>
 
-          <div className="card">
-            <h3>📡 Agent activity</h3>
-            <div className="feed">
-              {activity.length === 0 && <p className="dim small">No events yet.</p>}
-              {activity.map((e, i) => (
-                <div key={i} className="feed-row">
-                  <span className="tag">{e.agent}</span>
-                  <span>{e.message}</span>
-                  <span className="dim small">{e.detail}</span>
-                  <span className="dim tiny">
-                    {new Date(e.ts * 1000).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}
-                  </span>
+        <section className="card admin-panel">
+          <h2><ActivityIcon size={15} aria-hidden="true" /> Agent activity</h2>
+          <div className="feed">
+            {activity.length === 0 ? (
+              <div className="empty-state">Agent events will appear as notes move through the workflow.</div>
+            ) : activity.map((event, index) => (
+              <article className="feed-row" key={`${event.ts || 0}-${index}`}>
+                <div className="feed-agent">
+                  <span className="badge">{event.agent || "PRIVA"}</span>
+                  <span className="trace-time">{event.ts ? new Date(event.ts * 1000).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" }) : "now"}</span>
                 </div>
-              ))}
-            </div>
+                <p className="feed-message">{event.text || event.message || "Agent update"}</p>
+                {event.detail && <p className="feed-detail">{event.detail}</p>}
+              </article>
+            ))}
           </div>
-        </div>
+        </section>
+      </div>
 
-        {selected && (
-          <div className="card">
-            <h3>💬 {selected.name || selected.phone} — SMS thread</h3>
-            <div className="chat-box">
-              {rows.length === 0 && <p className="dim small">No messages.</p>}
-              {rows.map((m, i) => (
-                <div key={i} className={`bubble ${m.dir}`}>
-                  <span className="bubble-text">{m.text}</span>
-                </div>
-              ))}
-            </div>
+      {selected && (
+        <section className="card admin-thread">
+          <header className="summary-heading">
+            <h2><MessageSquare size={15} aria-hidden="true" /> {selected.name || selected.phone || "User"}</h2>
+            <span className="mono muted tiny">{selected.phone}</span>
+          </header>
+          <div className="chat-box">
+            {messages.length === 0 ? (
+              <div className="empty-state">No messages in this thread.</div>
+            ) : messages.map((message, index) => (
+              <div className={`bubble-wrap ${message.direction}`} key={`${message.direction}-${message.ts}-${index}`}>
+                <div className={`bubble ${message.direction}`}>{message.text}</div>
+                <span className="bubble-time">{new Date(message.ts * 1000).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}</span>
+              </div>
+            ))}
           </div>
-        )}
-      </section>
+        </section>
+      )}
     </AppShell>
   );
 }

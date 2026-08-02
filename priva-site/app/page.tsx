@@ -1,134 +1,192 @@
-import DemoSection from "../components/DemoSection";
-import { DOWNLOAD_URL, GITHUB_URL, WEB_APP_URL } from "../lib/constants";
+import {
+  ArrowRight,
+  Bell,
+  CreditCard,
+  Globe,
+  MessageSquare,
+  Monitor,
+  NotebookPen,
+  Share2,
+  Smartphone,
+  Wallet,
+} from "lucide-react";
+import Link from "next/link";
+import LandingDemo from "../components/LandingDemo";
+import Logo from "../components/Logo";
+import { DOWNLOAD_URL, GITHUB_URL } from "../lib/constants";
+
+const PLATFORMS = [
+  { icon: Monitor, title: "Desktop", copy: "A focused workspace for notes, chat, tasks, and orders." },
+  { icon: Globe, title: "Web", copy: "Your full PRIVA account, available from any modern browser." },
+  { icon: Smartphone, title: "SMS", copy: "Real replies and purchase updates in the thread already on your phone." },
+];
 
 const FEATURES = [
-  {
-    icon: "🧠",
-    title: "Your notes become offers",
-    desc: "Save it like you always do: “usb-c hub for travel, under 300.” PRIVA texts you a preference question, then ranked picks inside your budget.",
-  },
-  {
-    icon: "💬",
-    title: "SMS on your real phone",
-    desc: "No app required. PRIVA texts you through Linq on the same thread your phone already uses — the conversation mirrors to the web and desktop apps.",
-  },
-  {
-    icon: "🎯",
-    title: "Budget is a hard line",
-    desc: "Deep SerpApi search with budget-band matching, merchant trust, and a strict cap. Nothing over budget ships without your explicit consent.",
-  },
-  {
-    icon: "💳",
-    title: "Pay in one tap",
-    desc: "Prava (Visa Intelligent Commerce) sandbox checkout sessions with budget-excess detection before you pay.",
-  },
-  {
-    icon: "🛍️",
-    title: "It follows up",
-    desc: "Price-drop watch alerts, reminders from natural-language times (“remind me Friday”), and urgent-offer pacing when you say ASAP.",
-  },
-  {
-    icon: "📊",
-    title: "Your money, tracked",
-    desc: "Monthly caps, borrow-into-next-month, and spend by merchant — in a live purchase graph.",
-  },
+  { icon: NotebookPen, title: "Notes become shopping", copy: "PRIVA reads buy intent in notes you already keep." },
+  { icon: MessageSquare, title: "Chats on real SMS", copy: "Replies over Linq; same thread on phone, web, desktop." },
+  { icon: Wallet, title: "Budget cap", copy: "Three-tier budget guard; borrow from next month only when you approve." },
+  { icon: CreditCard, title: "One-tap pay via Prava", copy: "Visa Intelligent Commerce, secured through one considered handoff." },
+  { icon: Bell, title: "Smart follow-ups", copy: "Reminders, price-drop alerts, delivery pings." },
+  { icon: Share2, title: "Purchase graph", copy: "Your spending mapped in a live graph." },
 ];
 
-const STEPS = [
-  ["Type a note", "“need a usb-c hub for travel, under 300” — the kind of note you already keep."],
-  ["PRIVA texts you", "A preference question lands on your phone via Linq SMS."],
-  ["You answer", "“black, 8-in-1” — preferences are extracted and remembered."],
-  ["Pick a winner", "Deep search returns budget-capped, quality-ranked options with a best pick."],
-  ["Pay & track", "Prava sandbox checkout, budget accounting, shipping progress."],
-];
+const STEPS = ["Thought", "Note", "AI", "Products", "Checkout", "Delivered"];
 
-export default function Page() {
+export default function LandingPage() {
   return (
-    <main className="site">
-      <nav className="nav">
-        <a className="logo" href="/">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/priva.png" alt="PRIVA" />
-          <span>PRIVA</span>
-        </a>
-        <div className="nav-links">
-          <a href="#demo">Live demo</a>
-          <a href="#how">How it works</a>
-          <a href="#install">Install</a>
-          <a href={GITHUB_URL} target="_blank" rel="noreferrer">GitHub</a>
-          <a className="nav-cta" href="/login">Log in →</a>
-        </div>
-      </nav>
+    <main className="landing">
+      <div className="landing-nav-wrap">
+        <nav className="landing-container landing-nav" aria-label="Main navigation">
+          <Logo />
+          <div className="landing-links">
+            <a href="#features">Features</a>
+            <a href="#demo">Demo</a>
+            <a href={DOWNLOAD_URL}>Install</a>
+            <Link className="btn btn-primary btn-sm" href="/login">Log in</Link>
+          </div>
+        </nav>
+      </div>
 
-      <header className="hero">
-        <h1>
-          Where Notes
-          <br />
-          becomes <span className="gold">Purchase</span>
-        </h1>
-        <p className="hero-sub">
-          PRIVA reads the notes you already keep, finds the best options inside your budget,
-          pays with <b>Prava</b>, and texts you the whole way on <b>Linq SMS</b>.
-        </p>
-        <div className="hero-cta">
-          <a className="btn primary" href="#demo">Try the live demo</a>
-          <a className="btn" href={DOWNLOAD_URL}>Download installer</a>
-          <a className="btn ghost" href={WEB_APP_URL} target="_blank" rel="noreferrer">Open the app</a>
+      <header className="landing-container hero">
+        <div className="hero-copy">
+          <p className="hero-tag">PRIVA</p>
+          <h1 className="hero-title">
+            <span>Where Notes</span>
+            <span>Become <span className="gold-text">Purchases.</span></span>
+          </h1>
+          <p className="hero-sub">Write naturally. Discover intelligently. Purchase confidently.</p>
+          <div className="hero-actions">
+            <Link className="btn btn-primary btn-lg" href="/login">Try the live demo</Link>
+            <a className="btn btn-ghost btn-lg" href={DOWNLOAD_URL}>Install PRIVA v1.0.0</a>
+            <Link className="hero-open-link" href="/app">Open app <ArrowRight size={13} aria-hidden="true" /></Link>
+          </div>
+        </div>
+        <div className="demo-shell" id="demo">
+          <LandingDemo />
         </div>
       </header>
 
-      <section id="demo" className="section">
-        <h2>Live demo <span className="dim">— the notes part</span></h2>
-        <DemoSection />
+      <div className="trust-strip">
+        <div className="landing-container trust-row" aria-label="Technology partners">
+          {[
+            "OpenAI",
+            "Prava",
+            "Linq",
+            "SerpAPI",
+            "SQLite",
+            "Electron",
+          ].map((partner, index) => (
+            <span key={partner}>{partner}{index < 5 && <span className="trust-dot" aria-hidden="true">&middot;</span>}</span>
+          ))}
+        </div>
+      </div>
+
+      <section className="landing-container landing-section">
+        <div className="landing-section-head">
+          <div>
+            <p className="section-eyebrow">Cross-platform</p>
+            <h2>Your account, wherever the thought begins.</h2>
+          </div>
+        </div>
+        <div className="platform-grid">
+          {PLATFORMS.map(({ icon: Icon, title, copy }) => (
+            <article className="platform-card" key={title}>
+              <Icon size={23} strokeWidth={1.5} aria-hidden="true" />
+              <h3>{title}</h3>
+              <p>{copy}</p>
+            </article>
+          ))}
+        </div>
+        <p className="platform-statement">One account. Everywhere. Your notes, chat and orders follow you.</p>
       </section>
 
-      <section className="section">
-        <h2>An <span className="gold">agent</span>, not a chatbot</h2>
-        <div className="grid">
-          {FEATURES.map((f) => (
-            <div className="card" key={f.title}>
-              <div className="card-icon">{f.icon}</div>
-              <h3>{f.title}</h3>
-              <p>{f.desc}</p>
+      <section className="landing-section" id="features">
+        <div className="landing-container">
+          <div className="landing-section-head">
+            <div>
+              <p className="section-eyebrow">Features</p>
+              <h2>A purchase assistant that starts by listening.</h2>
+            </div>
+            <p>PRIVA works inside the habits you already have, then adds judgment where commerce becomes noisy.</p>
+          </div>
+          <div className="feature-grid">
+            {FEATURES.map(({ icon: Icon, title, copy }) => (
+              <article className="feature-item" key={title}>
+                <Icon className="feature-icon" size={22} strokeWidth={1.5} aria-hidden="true" />
+                <h3>{title}</h3>
+                <p>{copy}</p>
+              </article>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="landing-container landing-section">
+        <div className="landing-section-head">
+          <div>
+            <p className="section-eyebrow">Why PRIVA</p>
+            <h2>From passing thought to delivered order.</h2>
+          </div>
+          <p>No new vocabulary. No complicated workflow. Just a note, understood and carried through.</p>
+        </div>
+        <div className="why-timeline">
+          {STEPS.map((step, index) => (
+            <div className="why-step" key={step}>
+              <span className="why-number">{String(index + 1).padStart(2, "0")}</span>
+              <h3>{step}</h3>
             </div>
           ))}
         </div>
       </section>
 
-      <section id="how" className="section">
-        <h2>How it works</h2>
-        <div className="steps">
-          {STEPS.map(([t, d], i) => (
-            <div className="step" key={t}>
-              <div className="step-num">{i + 1}</div>
-              <h3>{t}</h3>
-              <p>{d}</p>
+      <section className="landing-container landing-section">
+        <div className="landing-section-head">
+          <div>
+            <p className="section-eyebrow">One continuous thread</p>
+            <h2>Write here. Reply there. Lose nothing.</h2>
+          </div>
+          <p>The same note and conversation remain intact across the desktop workspace and your phone.</p>
+        </div>
+        <div className="mockup-stage" aria-label="PRIVA on laptop and phone">
+          <div className="laptop">
+            <div className="laptop-screen">
+              <div className="mock-note">
+                <div className="mock-note-side">
+                  <span className="mock-side-label">Notes</span>
+                  <span className="mock-side-note on">Summer list</span>
+                  <span className="mock-side-note">Home office</span>
+                  <span className="mock-side-note">Travel</span>
+                </div>
+                <div className="mock-note-main">
+                  <h3>Summer list</h3>
+                  <p>need white shoes under 5000</p>
+                  <div className="mock-intents">
+                    <span>Shoes</span><span>White</span><span>under $5000</span>
+                  </div>
+                </div>
+              </div>
             </div>
-          ))}
+            <div className="laptop-base" />
+          </div>
+          <div className="phone-frame">
+            <div className="phone-screen">
+              <div className="phone-bubble">PRIVA found three white shoes within your budget. Do you prefer leather or canvas?</div>
+              <div className="phone-bubble out">Leather, minimal branding.</div>
+              <div className="phone-bubble">Understood. I ranked the cleanest options first.</div>
+            </div>
+          </div>
         </div>
       </section>
 
-      <section id="install" className="section install">
-        <h2>Get PRIVA on your desktop</h2>
-        <p>
-          Windows installer — the full app: chat, notes, purchase graph, tasks.
-          No setup, no account required.
-        </p>
-        <div className="hero-cta center">
-          <a className="btn primary big" href={DOWNLOAD_URL}>⬇ Download PRIVA 1.0.0 (.exe)</a>
+      <footer className="landing-footer">
+        <div className="landing-container footer-row">
+          <span>&copy; 2026 PRIVA</span>
+          <div className="footer-links">
+            <a href={GITHUB_URL} target="_blank" rel="noreferrer">GitHub</a>
+            <a href="https://devfolio.co" target="_blank" rel="noreferrer">Devfolio</a>
+            <a href="https://www.linkedin.com" target="_blank" rel="noreferrer">LinkedIn</a>
+          </div>
         </div>
-        <p className="dim small">
-          Electron · React · TypeScript · FastAPI — source on{" "}
-          <a href={GITHUB_URL} target="_blank" rel="noreferrer">GitHub</a>
-        </p>
-      </section>
-
-      <footer className="footer">
-        <p>
-          PRIVA — Personal Retail Intelligence via Agent.
-          Built with <b>Prava (Visa Intelligent Commerce)</b>, <b>Linq</b>, and <b>SerpApi</b>.
-        </p>
-        <p className="dim small">151 backend tests · multi-user web demo · phone + OTP login</p>
       </footer>
     </main>
   );

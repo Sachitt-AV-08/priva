@@ -1,19 +1,53 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useState } from "react";
+import { CheckCircle2, CreditCard, ExternalLink, ShoppingBag } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import AppShell from "../../components/AppShell";
+import PriceTag from "../../components/PriceTag";
+import Spinner from "../../components/Spinner";
 import { useAuth } from "../../lib/auth";
-import { apiFetch } from "../../lib/constants";
+import { apiFetch } from "../../lib/backend";
+
+type PendingPayment = {
+  user_id?: string;
+  session_id: string;
+  transaction_id?: string;
+  title: string;
+  price: number;
+  merchant?: string;
+  payment_url?: string;
+  budget_excess?: number;
+};
+type Transaction = {
+  id: string;
+  product_title?: string;
+  merchant?: string;
+  amount?: number;
+  status?: string;
+  shipping_status?: string;
+  created_at?: number | string;
+};
+type PaymentResult = { status?: string; error?: string; detail?: string };
+
+function safePaymentUrl(value?: string) {
+  if (!value) return "";
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" ? url.toString() : "";
+  } catch {
+    return "";
+  }
+}
 
 export default function CheckoutPage() {
   const { user, loading } = useAuth();
   const router = useRouter();
-  const [pending, setPending] = useState<any>(null);
+  const [pending, setPending] = useState<PendingPayment | null>(null);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [result, setResult] = useState<PaymentResult | null>(null);
   const [completing, setCompleting] = useState(false);
-  const [result, setResult] = useState<any>(null);
-  const [txns, setTxns] = useState<any[]>([]);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -21,110 +55,154 @@ export default function CheckoutPage() {
   }, [loading, user, router]);
 
   useEffect(() => {
+    if (!user) return;
     try {
-      const raw = window.sessionStorage.getItem("priva_pending");
-      if (raw) setPending(JSON.parse(raw));
+      const stored = window.sessionStorage.getItem("priva_pending");
+      if (stored) {
+        const parsed: PendingPayment = JSON.parse(stored);
+        if (parsed.user_id === user.user_id) setPending(parsed);
+        else window.sessionStorage.removeItem("priva_pending");
+      }
     } catch {
-      /* none */
+      window.sessionStorage.removeItem("priva_pending");
+    }
+  }, [user]);
+
+  const loadTransactions = useCallback(async () => {
+    try {
+      const response = await apiFetch("/api/transactions");
+      if (response.ok) setTransactions((await response.json()).transactions || []);
+    } catch {
+      // ReconnectPill reports transient failures.
     }
   }, []);
 
-  const loadTxns = () =>
-    apiFetch("/api/transactions")
-      .then(async (res) => {
-        if (res.ok) setTxns((await res.json()).transactions || []);
-      })
-      .catch(() => {});
-
   useEffect(() => {
-    if (user) loadTxns();
-  }, [user]);
+    if (user) loadTransactions();
+  }, [loadTransactions, user]);
 
-  const complete = async () => {
+  const completePayment = async () => {
     if (!pending || completing) return;
+    if (!user || pending.user_id !== user.user_id) {
+      window.sessionStorage.removeItem("priva_pending");
+      setPending(null);
+      setError("This payment session belongs to a different account");
+      return;
+    }
     setCompleting(true);
     setError("");
     try {
-      const res = await apiFetch("/api/pay/complete", {
+      const response = await apiFetch("/api/pay/complete", {
         method: "POST",
         body: JSON.stringify({
           session_id: pending.session_id,
           transaction_id: pending.transaction_id,
           amount: pending.price,
+          ...(pending.budget_excess != null ? { budget_excess: pending.budget_excess } : {}),
         }),
       });
-      const body = await res.json();
-      if (!res.ok) throw new Error(body.detail || "Completion failed");
+      const body: PaymentResult = await response.json();
+      if (!response.ok) throw new Error(body.detail || body.error || "Payment was not completed");
       setResult(body);
       if (body.status === "completed") {
         window.sessionStorage.removeItem("priva_pending");
         setPending(null);
-        loadTxns();
+        await loadTransactions();
       }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Backend unreachable");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Payment was not completed");
     } finally {
       setCompleting(false);
     }
   };
 
+  if (loading || !user) return <main className="loading-page"><Spinner /></main>;
+
   return (
     <AppShell>
-      <section className="section">
-        <h2>Checkout</h2>
-
-        {pending && (
-          <div className="card">
-            <h3>💳 Paying for: {pending.title}</h3>
-            <p className="price big-price">${Number(pending.price).toFixed(2)}</p>
-            <p className="dim small">
-              Payment session <code>{pending.session_id}</code> — via Prava (Visa Intelligent Commerce) sandbox.
-            </p>
-            <div className="btn-row">
-              {pending.payment_url && (
-                <a className="btn" href={pending.payment_url} target="_blank" rel="noreferrer">
-                  Open payment page
-                </a>
-              )}
-              <button className="btn primary" disabled={completing} onClick={complete}>
-                {completing ? "Waiting for Prava…" : "Complete payment (simulated)"}
-              </button>
-            </div>
-            {result && (
-              <p className={result.status === "completed" ? "ok" : "err"}>
-                {result.status === "completed"
-                  ? "✓ Payment completed — budget updated, order tracked."
-                  : `Status: ${result.status}${result.error ? ` (${result.error})` : ""}`}
-              </p>
-            )}
-          </div>
-        )}
-
-        {!pending && (
-          <div className="card">
-            <h3>No active payment</h3>
-            <p className="dim small">Find something in the Shop, then come back here to complete the checkout.</p>
-            <Link className="btn" href="/shop">Go to shop</Link>
-          </div>
-        )}
-
-        {error && <p className="err">{error}</p>}
-
-        <div className="card">
-          <h3>🧾 Your transactions</h3>
-          {txns.length === 0 && <p className="dim small">None yet.</p>}
-          <ul className="list">
-            {txns.map((t) => (
-              <li key={t.id} className="item">
-                <b>{t.product_title}</b>
-                <span className="tag">${t.amount}</span>
-                <span className={`tag tag-${t.status || "pending"}`}>{t.status || "pending"}</span>
-                {t.shipping_status && <span className="dim tiny">→ {t.shipping_status}</span>}
-              </li>
-            ))}
-          </ul>
+      <header className="page-head">
+        <div>
+          <p className="page-kicker">Secure handoff</p>
+          <h1>Checkout</h1>
+          <p className="page-description">Review the session, complete payment, and keep the order in one place.</p>
         </div>
-      </section>
+      </header>
+
+      <div className="checkout-grid">
+        <section className="card checkout-card">
+          {pending ? (
+            <>
+              <span className="checkout-icon"><CreditCard size={21} strokeWidth={1.6} aria-hidden="true" /></span>
+              <h2>{pending.title}</h2>
+              {pending.merchant && <p className="muted small">{pending.merchant}</p>}
+              <PriceTag className="checkout-price" value={Number(pending.price || 0)} />
+              <span className="session-code mono">Session {pending.session_id}</span>
+              {pending.budget_excess != null && (
+                <p className="muted tiny">Includes your approved next-month budget adjustment.</p>
+              )}
+              <div className="btn-row checkout-actions">
+                {safePaymentUrl(pending.payment_url) && (
+                  <a className="btn btn-ghost" href={safePaymentUrl(pending.payment_url)} target="_blank" rel="noreferrer">
+                    Open payment page <ExternalLink size={13} aria-hidden="true" />
+                  </a>
+                )}
+                <button className="btn btn-primary btn-lg" type="button" onClick={completePayment} disabled={completing}>
+                  <CreditCard size={15} aria-hidden="true" />
+                  {completing ? "Completing..." : "Complete payment"}
+                </button>
+              </div>
+            </>
+          ) : result?.status === "completed" ? (
+            <div className="checkout-complete">
+              <CheckCircle2 size={30} strokeWidth={1.5} aria-hidden="true" />
+              <h2>Payment complete</h2>
+              <p>Your budget is updated and the order is now being tracked.</p>
+              <Link className="btn btn-primary" href="/shop">Return to shop</Link>
+            </div>
+          ) : (
+            <div className="checkout-complete">
+              <ShoppingBag size={28} strokeWidth={1.5} aria-hidden="true" />
+              <h2>No active payment</h2>
+              <p>Choose a product in Shop to begin a checkout session.</p>
+              <Link className="btn btn-primary" href="/shop">Go to shop</Link>
+            </div>
+          )}
+          {result && result.status !== "completed" && (
+            <p className="muted small" role="status">Status: {result.status || "pending"}{result.error ? ` · ${result.error}` : ""}</p>
+          )}
+          {error && <p className="err small" role="alert">{error}</p>}
+        </section>
+
+        <aside className="card checkout-transactions">
+          <h2>Recent transactions</h2>
+          {transactions.length === 0 ? (
+            <div className="empty-state">Your completed checkouts will appear here.</div>
+          ) : (
+            <div className="summary-list">
+              {[...transactions].sort((a, b) => {
+                const time = (value: Transaction["created_at"]) => {
+                  if (typeof value === "number") return value;
+                  return value ? new Date(value).getTime() : 0;
+                };
+                return time(b.created_at) - time(a.created_at);
+              }).slice(0, 7).map((transaction) => (
+                <div className="summary-row" key={transaction.id}>
+                  <div className="summary-row-title">
+                    <span>{transaction.product_title || "Purchase"}</span>
+                    <PriceTag value={Number(transaction.amount || 0)} />
+                  </div>
+                  <div className="summary-row-meta">
+                    <span>{transaction.merchant || "Merchant"}</span>
+                    <span className={`badge tag-${transaction.status || "pending"}`}>
+                      {(transaction.shipping_status || transaction.status || "pending").replaceAll("_", " ")}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </aside>
+      </div>
     </AppShell>
   );
 }

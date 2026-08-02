@@ -1,64 +1,116 @@
 "use client";
 
+import {
+  ArrowLeft,
+  ListTodo,
+  LogOut,
+  MessageSquare,
+  NotebookPen,
+  Share2,
+  Shield,
+  ShoppingBag,
+} from "lucide-react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "../lib/auth";
+import Logo from "./Logo";
+import ReconnectPill from "./ReconnectPill";
 
 const NAV = [
-  { href: "/dashboard", label: "Chat", icon: "💬" },
-  { href: "/notes/new", label: "Notes", icon: "📝" },
-  { href: "/shop", label: "Shop", icon: "🛍️" },
+  { href: "/dashboard", label: "Chat", icon: MessageSquare },
+  { href: "/notes", label: "Notes", icon: NotebookPen },
+  { href: "/tasks", label: "Tasks", icon: ListTodo },
+  { href: "/shop", label: "Shop", icon: ShoppingBag },
+  { href: "/purchase-graph", label: "Purchase Graph", icon: Share2 },
 ];
+
+const PAGE_TITLES: Record<string, string> = {
+  "/dashboard": "Chat",
+  "/notes": "Notes",
+  "/tasks": "Tasks",
+  "/shop": "Shop",
+  "/checkout": "Checkout",
+  "/purchase-graph": "Purchase Graph",
+  "/admin": "Admin",
+};
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const { user, logout } = useAuth();
-  const path = usePathname();
+  const pathname = usePathname();
+  const router = useRouter();
+  const title = Object.entries(PAGE_TITLES).find(([path]) => pathname.startsWith(path))?.[1] || "PRIVA";
+
+  const isActive = (href: string) =>
+    href === "/dashboard" ? pathname === href : pathname.startsWith(href);
+
+  const logOut = () => {
+    window.sessionStorage.removeItem("priva_pending");
+    logout();
+    router.replace("/login");
+  };
 
   return (
     <main className="app-shell">
-      <aside className="app-side">
-        <div className="side-logo">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/priva.png" alt="PRIVA" />
-          <span>PRIVA</span>
-        </div>
+      <aside className="app-side" aria-label="Primary navigation">
+        <div className="side-logo"><Logo /></div>
         <nav className="side-nav">
-          {NAV.map((n) => {
-            const on = path.startsWith(n.href) && (n.href === "/dashboard" ? path === "/dashboard" : true);
+          {NAV.map((item) => {
+            const Icon = item.icon;
             return (
-              <Link key={n.href} href={n.href} className={`side-item${on ? " on" : ""}`}>
-                <span className="side-icon">{n.icon}</span>
-                <span>{n.label}</span>
-                {on && <span className="side-dot" />}
+              <Link
+                key={item.href}
+                href={item.href}
+                className={`side-item${isActive(item.href) ? " on" : ""}`}
+                data-tooltip={item.label}
+                aria-label={item.label}
+                aria-current={isActive(item.href) ? "page" : undefined}
+              >
+                <span className="side-icon"><Icon size={17} strokeWidth={1.8} aria-hidden="true" /></span>
+                <span className="side-label">{item.label}</span>
               </Link>
             );
           })}
           {user?.is_admin && (
-            <Link href="/admin" className={`side-item${path === "/admin" ? " on" : ""}`}>
-              <span className="side-icon">👑</span>
-              <span>Admin</span>
-              {path === "/admin" && <span className="side-dot" />}
+            <Link
+              href="/admin"
+              className={`side-item${pathname.startsWith("/admin") ? " on" : ""}`}
+              data-tooltip="Admin"
+              aria-label="Admin"
+              aria-current={pathname.startsWith("/admin") ? "page" : undefined}
+            >
+              <span className="side-icon"><Shield size={17} strokeWidth={1.8} aria-hidden="true" /></span>
+              <span className="side-label">Admin</span>
             </Link>
           )}
         </nav>
         <div className="side-user">
           {user && (
-            <>
-              <div className="side-user-info">
-                <b>{user.name || "You"}</b>
-                <span className="dim small">{user.phone}</span>
-              </div>
-              <button className="btn ghost small-btn" onClick={logout}>Log out</button>
-            </>
+            <div className="side-user-info">
+              <span className="side-user-name">{user.name || "You"}</span>
+              <span className="side-user-phone">{user.phone}</span>
+            </div>
           )}
+          <button className="btn btn-ghost btn-sm side-logout" type="button" onClick={logOut} title="Log out" aria-label="Log out">
+            <LogOut size={14} aria-hidden="true" />
+            <span className="logout-label">Log out</span>
+          </button>
         </div>
       </aside>
-      <div className="app-content">
-        <div className="app-topbar">
-          <span className="dim small">connected to the live demo backend</span>
-          <Link href="/" className="dim small">← back to site</Link>
-        </div>
-        {children}
+
+      <div className="app-main">
+        <header className="app-topbar">
+          <div className="app-topbar-left">
+            <h1 className="app-page-title">{title}</h1>
+            <ReconnectPill />
+          </div>
+          <div className="app-topbar-right">
+            <Link href="/" className="back-to-site" aria-label="Back to site">
+              <ArrowLeft size={13} aria-hidden="true" />
+              <span className="back-to-site-label">back to site</span>
+            </Link>
+          </div>
+        </header>
+        <div className="app-content">{children}</div>
       </div>
     </main>
   );
