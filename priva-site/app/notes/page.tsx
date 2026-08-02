@@ -39,6 +39,7 @@ type Analysis = {
   reminders?: { text: string; due_at: number; parsed_from?: string }[];
   category?: string;
   summary?: string;
+  offer_state?: "sent" | "already_purchased" | "already_offered" | "cooldown" | "not_shopping";
 };
 type AgentEvent = {
   agent?: string;
@@ -512,8 +513,16 @@ export default function NotesPage() {
                       {intent.item}
                     </Link>
                   ))}
-                  {(analysis.buy_intents || []).length > 0 && (
-                    <span className="muted tiny">shopping · texted you</span>
+                  {(analysis.buy_intents || []).length > 0 && analysis.offer_state && analysis.offer_state !== "not_shopping" && (
+                    <span className="muted tiny">
+                      shopping · {analysis.offer_state === "already_purchased"
+                        ? "already purchased"
+                        : analysis.offer_state === "already_offered"
+                          ? "already offered"
+                          : analysis.offer_state === "cooldown"
+                            ? "offer paused"
+                            : "texted you"}
+                    </span>
                   )}
                 </div>
                 {analysis.summary && <p className="analysis-summary">{analysis.summary}</p>}

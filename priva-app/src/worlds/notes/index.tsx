@@ -470,7 +470,8 @@ export function NotesWorld() {
       setNotes((prev) => prev.map((n) => {
         const a = list.find((x) => x.id === n.id);
         if (!a) return n;
-        return { ...n, analysis: { buy_intents: (a.buy_intents ?? []) as NoteAnalysis["buy_intents"], todos: a.todos ?? [], reminders: (a as { reminders?: NoteAnalysis["reminders"] }).reminders ?? [], category: a.category ?? "general", summary: a.summary ?? "" } };
+        const aAnalysis = a as unknown as NoteAnalysis;
+        return { ...n, analysis: { buy_intents: aAnalysis.buy_intents ?? [], todos: aAnalysis.todos ?? [], reminders: aAnalysis.reminders ?? [], category: aAnalysis.category ?? "general", summary: aAnalysis.summary ?? "", offer_state: aAnalysis.offer_state ?? n.analysis?.offer_state } };
       }));
     }).catch(() => {});
   }, [notes.length]);

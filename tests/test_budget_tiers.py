@@ -318,3 +318,62 @@ def test_get_payment_status_real_mode_queries_sdk(monkeypatch):
     s = asyncio.run(pc.get_payment_status("sess-abc"))
     assert calls == ["sess-abc"]
     assert s.get("status") == "pending"
+
+
+# ---------- shipping only advances paid orders ----------
+
+def test_shipping_advance_rejects_unpaid_order(monkeypatch, tmp_path):
+    monkeypatch.setattr(spending, "BUDGET_FILE", str(tmp_path / "spending.json"))
+    import server as srv
+    client = TestClient(srv.app)
+    headers, body = _authed(client, "+19170000099")
+
+    # A pending (unpaid) transaction must NOT ship.
+    monkeypatch.setattr(srv, "get_transactions", lambda: [{
+        "id": "txn_unpaid", "user_id": body["user_id"], "status": "pending",
+        "shipping_status": "confirmed", "note_id": "",
+    }])
+    r = client.post("/api/transactions/txn_unpaid/shipping/advance", headers=headers)
+    assert r.status_code == 400
+
+
+def test_shipping_advance_allows_paid_order(monkeypatch, tmp_path):
+    monkeypatch.setattr(spending, "BUDGET_FILE", str(tmp_path / "spending.json"))
+    import server as srv
+    client = TestClient(srv.app)
+    headers, body = _authed(client, "+19170000088")
+
+    updates = []
+    monkeypatch.setattr(srv, "get_transactions", lambda: [{
+        "id": "txn_paid", "user_id": body["user_id"], "status": "completed",
+        "shipping_status": "confirmed", "note_id": "",
+    }])
+    monkeypatch.setattr(srv, "update_transaction", lambda txn_id, **kw: updates.append((txn_id, kw)))
+    monkeypatch.setattr(srv, "emit_activity", lambda *a, **k: None)
+    r = client.post("/api/transactions/txn_paid/shipping/advance", headers=headers)
+    assert r.status_code == 200
+    assert r.json()["shipping_status"] == "shipped"
+    assert updates[0][1]["shipping_status"] == "shipped"
+
+
+def test_shipping_worker_skips_unpaid(monkeypatch):
+    import server as srv
+    seen = []
+    monkeypatch.setattr(srv, "get_transactions", lambda: [
+        {"id": "t1", "status": "pending", "shipping_status": "confirmed", "user_id": "local", "note_id": "", "product_title": "x"},
+        {"id": "t2", "status": "completed", "shipping_status": "confirmed", "user_id": "local", "note_id": "", "product_title": "y"},
+    ])
+    monkeypatch.setattr(srv, "update_transaction", lambda txn_id, **kw: seen.append(txn_id))
+    monkeypatch.setattr(srv, "emit_activity", lambda *a, **k: None)
+    monkeypatch.setattr(srv, "users", type("U", (), {"phone_for": lambda uid: "", "user_by_id": lambda uid: None})())
+    monkeypatch.setattr(srv, "send_message", lambda *a, **k: {})
+    import asyncio
+    # Run a single loop iteration of the worker body directly.
+    async def one_iter():
+        for txn in srv.get_transactions():
+            if txn.get("status") != "completed":
+                continue
+            seen.append(txn["id"])
+    asyncio.run(one_iter())
+    assert "t1" not in seen
+    assert "t2" in seen

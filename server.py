@@ -284,6 +284,10 @@ async def _shipping_worker():
         await asyncio.sleep(SHIPPING_INTERVAL)
         try:
             for txn in get_transactions():
+                # Only paid orders ship. A pending (unpaid) transaction must
+                # never advance through the delivery timeline.
+                if txn.get("status") != "completed":
+                    continue
                 cur = txn.get("shipping_status") or "confirmed"
                 if cur == "delivered":
                     continue
@@ -317,6 +321,8 @@ async def api_shipping_advance(txn_id: str, user: dict = Depends(require_user)):
         raise HTTPException(status_code=404, detail="Transaction not found")
     if not _txn_owned(user, txn.get("user_id")):
         raise HTTPException(status_code=403, detail="Not your transaction")
+    if txn.get("status") != "completed":
+        raise HTTPException(status_code=400, detail="Order not paid yet — shipping only advances after payment")
     current = txn.get("shipping_status") or "confirmed"
     idx = SHIPPING_STEPS.index(current) if current in SHIPPING_STEPS else 0
     if idx < len(SHIPPING_STEPS) - 1:
