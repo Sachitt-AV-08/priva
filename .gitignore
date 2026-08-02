@@ -34,3 +34,4 @@ priva-app/*.exe
 priva-site/node_modules/
 priva-site/.next/
 priva-site/out/
+priva-app/*.tsbuildinfo
