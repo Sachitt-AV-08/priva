@@ -1319,8 +1319,9 @@ async def handle_buy_now(from_: str, text: str, thread_id: str, conv: dict):
                 "step": "awaiting_consent",
                 "selected_product": best.model_dump(),
                 "from": from_,
+                "user_id": conv.get("user_id", ""),
             }
-            await send_consent(from_, best.model_dump(), thread_id)
+            await send_consent(from_, best.model_dump(), thread_id, user_id=conv.get("user_id", ""))
             return "awaiting_consent"
     ranked, best_reason, over_budget = await _search_and_pick(item, price_hint, prefs, category=category)
     if not ranked:
@@ -1331,8 +1332,9 @@ async def handle_buy_now(from_: str, text: str, thread_id: str, conv: dict):
         "step": "awaiting_consent",
         "selected_product": best.model_dump(),
         "from": from_,
+        "user_id": conv.get("user_id", ""),
     }
-    await send_consent(from_, best.model_dump(), thread_id)
+    await send_consent(from_, best.model_dump(), thread_id, user_id=conv.get("user_id", ""))
     return "awaiting_consent"
 
 async def _prava_error_summary(status: dict) -> str:
@@ -1464,13 +1466,14 @@ async def handle_choice(from_: str, text: str, thread_id: str):
                 conv["selected_product"] = selected
                 try:
                     from spending import tier_for
-                    _tier = tier_for(float(selected.get("price", 0) or 0))
+                    _uid = conv.get("user_id", "")
+                    _tier = tier_for(float(selected.get("price", 0) or 0), user_id=_uid)
                     if _tier.get("tier") == "exceeds":
                         conv["budget_excess"] = _tier["excess"]
                 except Exception:
                     pass
                 conversations[thread_id] = conv
-                await send_consent(from_, selected, thread_id)
+                await send_consent(from_, selected, thread_id, user_id=conv.get("user_id", ""))
             else:
                 await send_message(from_, "Invalid choice. Please reply with a number 1-5.", thread_id)
         elif "more" in choice.lower():

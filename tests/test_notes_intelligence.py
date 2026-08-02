@@ -207,7 +207,7 @@ def test_more_options_exhausted_prompts_again(monkeypatch):
 def test_choice_digit_accepts_second_batch_item(monkeypatch):
     import server as srv
     consents = []
-    async def fake_send_consent(to, product, thread_id=""):
+    async def fake_send_consent(to, product, thread_id="", user_id=""):
         consents.append(product)
         return {}
     monkeypatch.setattr(srv, "send_consent", fake_send_consent)
@@ -364,7 +364,7 @@ def test_buy_now_uses_deep_pipeline_without_staged(monkeypatch):
         calls["decide"].append(query)
         return {"index": 0, "reason": "best overall"}
     consents = []
-    async def fake_send_consent(to, product, thread_id=""):
+    async def fake_send_consent(to, product, thread_id="", user_id=""):
         consents.append(product)
         return {}
     async def fake_send_message(to, text, thread_id=""):

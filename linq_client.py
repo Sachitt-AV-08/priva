@@ -314,14 +314,22 @@ async def send_more_options(to: str, products: list, start: int, thread_id: str 
     return results[-1] if results else {"error": {"message": "no products"}}
 
 
-async def send_consent(to: str, product: dict, thread_id: str = "") -> dict:
+async def send_consent(to: str, product: dict, thread_id: str = "", user_id: str = "") -> dict:
     tier = {}
     budget_line = ""
     try:
         from spending import tier_for, get_budget
         price = _g(product, "price", 0)
-        tier = tier_for(price) or {}
-        limit = get_budget()
+        # Budgets are per-user: resolve the owner of this conversation so the
+        # check uses only their spending, not everyone's combined totals.
+        if not user_id:
+            try:
+                import users
+                user_id = (users.user_by_phone(to) or {}).get("user_id", "") or ""
+            except Exception:
+                user_id = ""
+        tier = tier_for(price, user_id=user_id) or {}
+        limit = get_budget(user_id) if user_id else get_budget()
         if tier.get("tier") == "exceeds":
             # Stage 2 — cap confirmation: user must explicitly approve the overspend
             budget_line = (
