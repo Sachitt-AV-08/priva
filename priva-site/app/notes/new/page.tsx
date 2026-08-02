@@ -67,6 +67,7 @@ export default function NewNotePage() {
       const res = await apiFetch("/api/notes", {
         method: "POST",
         body: JSON.stringify({
+          id: `web-${Date.now()}`,
           title: note.split("\n")[0].slice(0, 60),
           blocks: [{ type: "text", content: note }],
           tags: [],
