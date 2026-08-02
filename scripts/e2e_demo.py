@@ -98,18 +98,28 @@ def looks_like_results(q):
     return any(k in ql for k in ("found options", "best pick", "options:", "more options", "reply 1/2/3", "reply with a number", "1. ", "2. ", "3. "))
 
 
+def purchased_guard_skipped(base, token, note_id):
+    """True when the backend skipped our note because the item was bought before."""
+    st, body = http(base, "/api/agent/activity")
+    if st != 200:
+        return False
+    for ev in body.get("events", []):
+        if ev.get("note_id") == note_id and "already purchased" in ev.get("message", ""):
+            return True
+    return False
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--base", default="http://127.0.0.1:8766")
     ap.add_argument("--item", default="")
     args = ap.parse_args()
     base = args.base.rstrip("/")
+    items = ["wireless mouse", "yoga mat", "coffee grinder", "desk lamp",
+             "mechanical keyboard", "car phone mount", "electric toothbrush"]
     if args.item:
-        item = args.item
-    else:
-        items = ["wireless mouse", "yoga mat", "coffee grinder", "desk lamp",
-                 "mechanical keyboard", "car phone mount", "electric toothbrush"]
-        item = items[int(time.time()) % len(items)]
+        items = [args.item]
+    start_idx = (int(time.time()) // 60) % len(items)
     phone = "+1" + str(1000000000 + int(time.time()) % 1000000000)
     name = "E2E Judge"
     token = ""
@@ -133,20 +143,32 @@ def main():
         print(f"FAIL verify ({st}): {body.get('detail', body)}"); sys.exit(1)
     print(f"PASS 2/6 verify -> token ({body.get('name')} / {body.get('user_id')})")
 
-    # 3. save note -> offer arrives
-    note_id = "e2e-" + uuid.uuid4().hex[:8]
-    st, body = http(base, "/api/notes", "POST",
-                    {"id": note_id, "title": f"need a {item}",
-                     "blocks": [{"type": "text", "content": f"need a {item} for travel under 300"}]},
-                    token=token)
-    if st != 200:
-        print(f"FAIL note save ({st}): {body.get('detail', body)}"); sys.exit(1)
-    print(f"PASS 3/6 note saved ({note_id}) — waiting for PRIVA offer (<=40s)...")
-    offer = wait_for(base, token, text_matches("PRIVA:"), OFFER_TIMEOUT, "offer SMS")
-    if not offer:
+    # 3. save note -> offer arrives (retry once on the already-purchased guard)
+    item = items[start_idx]
+    note_id = ""
+    offer = None
+    for attempt in range(min(len(items), 3)):
+        if attempt:
+            item = items[(start_idx + attempt) % len(items)]
+        note_id = "e2e-" + uuid.uuid4().hex[:8]
+        st, body = http(base, "/api/notes", "POST",
+                        {"id": note_id, "title": f"need a {item}",
+                         "blocks": [{"type": "text", "content": f"need a {item} for travel under 300"}]},
+                        token=token)
+        if st != 200:
+            print(f"FAIL note save ({st}): {body.get('detail', body)}"); sys.exit(1)
+        print(f"PASS 3/6 note saved ({note_id}, '{item}') — waiting for PRIVA offer (<=40s)...")
+        offer = wait_for(base, token, text_matches("PRIVA:"), OFFER_TIMEOUT, "offer SMS")
+        if offer:
+            break
+        if purchased_guard_skipped(base, token, note_id):
+            print(f"  '{item}' was bought in an earlier run — retrying with next item")
+            continue
         print("  latest transcript:",
               json.dumps(transcript_msgs(base, token)[0][-3:], default=str)[:400])
         sys.exit(1)
+    if not offer:
+        print(f"FAIL no offer for any item ({items})"); sys.exit(1)
     print(f"  offer: {offer['text'][:90]}...")
 
     # 4. reply YES -> prefs questions (if any) -> options
