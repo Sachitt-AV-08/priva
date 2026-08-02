@@ -1,6 +1,8 @@
 """Auth flow: phone + name + OTP -> bearer token -> authenticated endpoints."""
 import os
+import re
 import sys
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -129,14 +131,110 @@ def test_admin_phone_gets_admin():
 def test_otp_sms_delivery_when_not_demo(monkeypatch):
     monkeypatch.setattr(server, "DEMO_MODE", False)
     monkeypatch.setattr(server, "LINQ_API_KEY", "test-key")
+    calls = []
+
+    async def fake_send(to, text, thread_id=""):
+        calls.append((to, text, thread_id))
+        return {"ok": True, "message_id": "m1"}
+
+    monkeypatch.setattr(server, "send_message", fake_send)
     client = _client()
     res = client.post("/api/auth/otp", json={"phone": "+19173842736", "name": "A"})
     assert res.status_code == 200
     body = res.json()
     assert "otp" not in body
     assert body["delivery"] == "sms"
-    threads = {m["thread_id"] for m in linq_client.outbox()}
-    assert any(t.startswith("otp_") for t in threads)
+    assert body["sent"] is True
+    assert len(calls) == 1
+    to, text, thread_id = calls[0]
+    assert to == "+19173842736"
+    assert "PRIVA verification code:" in text
+    assert thread_id.startswith("otp_")
+
+
+def test_otp_inline_fallback_when_sms_fails(monkeypatch):
+    monkeypatch.setattr(server, "DEMO_MODE", True)
+    monkeypatch.setattr(server, "LINQ_API_KEY", "test-key")
+
+    async def fake_send(to, text, thread_id=""):
+        return {"ok": True, "demo": True}
+
+    monkeypatch.setattr(server, "send_message", fake_send)
+    client = _client()
+    res = client.post("/api/auth/otp", json={"phone": "+19173842736", "name": "A"})
+    assert res.status_code == 200
+    body = res.json()
+    assert body["delivery"] == "inline"
+    assert body["sent"] is True
+    assert re.fullmatch(r"\d{6}", body["otp"])
+
+
+def test_otp_rate_limited_per_phone(monkeypatch):
+    monkeypatch.setattr(server, "DEMO_MODE", True)
+    monkeypatch.setattr(server, "LINQ_API_KEY", "")
+
+    async def fake_send(to, text, thread_id=""):
+        return {"ok": True, "demo": True}
+
+    monkeypatch.setattr(server, "send_message", fake_send)
+    client = _client()
+    for _ in range(3):
+        assert client.post("/api/auth/otp", json={"phone": "+19173842736"}).status_code == 200
+    res = client.post("/api/auth/otp", json={"phone": "+19173842736"})
+    assert res.status_code == 429
+    assert "try again in" in res.json()["detail"].lower()
+
+
+def test_otp_wrong_attempts_invalidate_code(monkeypatch):
+    monkeypatch.setattr(server, "DEMO_MODE", True)
+    monkeypatch.setattr(server, "LINQ_API_KEY", "")
+    client = _client()
+    client.post("/api/auth/otp", json={"phone": "+19173842736"})
+    for i in range(users.OTP_MAX_ATTEMPTS):
+        res = client.post("/api/auth/verify", json={"phone": "+19173842736", "otp": "000000"})
+        if i < users.OTP_MAX_ATTEMPTS - 1:
+            assert res.status_code == 401
+        else:
+            assert res.status_code == 429
+            assert "new code" in res.json()["detail"].lower()
+    res = client.post("/api/auth/verify", json={"phone": "+19173842736", "otp": "000000"})
+    assert res.status_code == 401
+
+
+def test_demo_search_public_and_rate_limited(monkeypatch):
+    import serpapi_client as sc
+
+    async def fake_search(query, max_price=None, limit=5, start=0, ns=""):
+        from models import Product
+        return [Product(id="d1", title=f"Demo {query}", price=25.0, merchant="Shop")]
+
+    monkeypatch.setattr(server, "search_products", fake_search)
+    client = _client()
+    res = client.post("/api/demo/search", json={"query": "sneakers", "limit": 2})
+    assert res.status_code == 200
+    products = res.json()["products"]
+    assert len(products) == 1
+    assert products[0]["title"].startswith("Demo")
+    for _ in range(server._DEMO_SEARCH_MAX_PER_MIN):
+        client.post("/api/demo/search", json={"query": "sneakers"})
+    assert client.post("/api/demo/search", json={"query": "sneakers"}).status_code == 429
+
+
+def test_config_exposes_quota_and_demo_mode():
+    client = _client()
+    body = client.get("/api/config").json()
+    assert body["serpapi_daily_cap"] > 0
+    assert body["serpapi_daily_remaining"] <= body["serpapi_daily_cap"]
+    assert "demo_mode" in body
+    assert body["otp_max_attempts"] == users.OTP_MAX_ATTEMPTS
+
+
+def test_serpapi_quota_guard(monkeypatch):
+    import serpapi_client as sc
+    monkeypatch.setattr(sc, "_load_usage", lambda: {time.strftime("%Y-%m-%d"): sc.DAILY_CAP})
+    assert sc.quota_daily_remaining() == 0
+    assert sc._charge_quota() is False
+    assert sc._quota_blocked() is False or sc._quota_exhausted is False
 
 
 def test_demo_login_mints_token_for_existing_user():
