@@ -17,11 +17,11 @@ interface GraphEdge {
 }
 
 const GROUP_COLORS: Record<string, string> = {
-  user: "#8b5cf6",
-  store: "#22c55e",
-  electronics: "#3b82f6",
-  clothing: "#ec4899",
-  accessories: "#f59e0b",
+  user: "#d4af37",
+  store: "#b76e79",
+  electronics: "#b76e79",
+  clothing: "#d9a5a0",
+  accessories: "#a0a0a0",
 };
 
 function productGroup(title: string): string {
@@ -123,7 +123,7 @@ function drawGraph(
     }
 
     // Label
-    ctx.fillStyle = isHovered ? "#f0f0f0" : "rgba(255,255,255,0.6)";
+    ctx.fillStyle = isHovered ? "#f4f4f4" : "rgba(255,255,255,0.6)";
     ctx.font = isHovered ? "10px Inter, sans-serif" : "9px Inter, sans-serif";
     ctx.textAlign = "center";
     ctx.fillText(node.label, node.x, node.y + radius + 12);
@@ -159,7 +159,7 @@ export function PurchaseGraphWorld() {
     return () => clearInterval(id);
   }, [refresh]);
 
-  const graph = useMemo(() => buildGraph(txns), [txns]);
+  const graph = useMemo(() => buildGraph(txns.filter((transaction) => transaction.status === "completed")), [txns]);
 
   useEffect(() => {
     const { nodes: rawNodes, edges } = graph;
@@ -206,8 +206,8 @@ export function PurchaseGraphWorld() {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
-    const x = (e.clientX - rect.left) / zoom;
-    const y = (e.clientY - rect.top) / zoom;
+    const x = (e.clientX - rect.left) * (canvas.width / rect.width);
+    const y = (e.clientY - rect.top) * (canvas.height / rect.height);
 
     let found: string | null = null;
     for (const node of nodesRef.current) {
@@ -286,7 +286,7 @@ export function PurchaseGraphWorld() {
                 <span className="mx-1.5 text-border-active">·</span>
                 <span className="text-accent-orange">{pending}</span> pending pay
                 <span className="mx-1.5 text-border-active">·</span>
-                <span className="text-accent">{shipping}</span> in transit
+                <span className="text-accent-bright">{shipping}</span> in transit
               </div>
             </div>
             <Truck size={16} className="text-accent" />

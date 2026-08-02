@@ -25,6 +25,7 @@ interface ShapeObj {
   y: number;
   w: number;
   h: number;
+  angle?: number;
 }
 
 interface DrawingDoc {
@@ -33,15 +34,15 @@ interface DrawingDoc {
 }
 
 const EMPTY_DOC: DrawingDoc = { strokes: [], shapes: [] };
-const COLORS = ["#e8ecf4", "#7c9cff", "#ff6b6b", "#ffd166"];
+const COLORS = ["#f4f4f4", "#d4af37", "#b76e79", "#e5484d"];
 const WIDTHS = [2, 4, 6];
 const CANVAS_H = 320;
 const MIN_SIZE = 10;
 
 type Draft =
   | { kind: "stroke"; color: string; width: number; points: Pt[] }
-  | { kind: "move"; id: string; dx: number; dy: number }
-  | { kind: "resize"; id: string; hx: number; hy: number; sx: number; sy: number; sw: number; sh: number };
+  | { kind: "move"; id: string; dx: number; dy: number; before: DrawingDoc }
+  | { kind: "resize"; id: string; hx: number; hy: number; sx: number; sy: number; sw: number; sh: number; before: DrawingDoc };
 
 function parseDoc(content: string): DrawingDoc {
   try {
@@ -79,9 +80,9 @@ export function DrawingCanvas({ value, onChange }: { value: string; onChange: (c
   const snapRef = useRef(snap);
   snapRef.current = snap;
 
-  const commit = useCallback((next: DrawingDoc) => {
+  const commit = useCallback((next: DrawingDoc, previous: DrawingDoc = docRef.current) => {
     setDoc(next);
-    setHistory((h) => (h.length > 50 ? [...h.slice(h.length - 50), docRef.current] : [...h, docRef.current]));
+    setHistory((h) => (h.length > 50 ? [...h.slice(h.length - 50), previous] : [...h, previous]));
     onChange(JSON.stringify(next));
   }, [onChange]);
 
@@ -99,25 +100,30 @@ export function DrawingCanvas({ value, onChange }: { value: string; onChange: (c
       ctx.moveTo(s.x, s.y);
       ctx.lineTo(s.x + s.w, s.y + s.h);
     } else if (s.kind === "arrow") {
+      const angle = s.angle ?? 0;
+      const length = Math.max(12, Math.hypot(s.w, s.h));
+      const cx = s.x + s.w / 2;
       const cy = s.y + s.h / 2;
-      const head = Math.min(s.w * 0.3, 18);
-      ctx.moveTo(s.x, cy);
-      ctx.lineTo(s.x + s.w, cy);
-      ctx.moveTo(s.x + s.w, cy);
-      ctx.lineTo(s.x + s.w - head, cy - head * 0.55);
-      ctx.moveTo(s.x + s.w, cy);
-      ctx.lineTo(s.x + s.w - head, cy + head * 0.55);
+      const start = { x: cx - Math.cos(angle) * length / 2, y: cy - Math.sin(angle) * length / 2 };
+      const end = { x: cx + Math.cos(angle) * length / 2, y: cy + Math.sin(angle) * length / 2 };
+      const head = Math.min(length * 0.3, 18);
+      ctx.moveTo(start.x, start.y);
+      ctx.lineTo(end.x, end.y);
+      ctx.moveTo(end.x, end.y);
+      ctx.lineTo(end.x - Math.cos(angle - Math.PI / 6) * head, end.y - Math.sin(angle - Math.PI / 6) * head);
+      ctx.moveTo(end.x, end.y);
+      ctx.lineTo(end.x - Math.cos(angle + Math.PI / 6) * head, end.y - Math.sin(angle + Math.PI / 6) * head);
     }
     ctx.stroke();
   };
 
   const drawSelection = (ctx: CanvasRenderingContext2D, s: ShapeObj) => {
-    ctx.strokeStyle = "rgba(124, 156, 255, 0.8)";
+    ctx.strokeStyle = "rgba(183, 110, 121, 0.8)";
     ctx.lineWidth = 1;
     ctx.setLineDash([4, 3]);
     ctx.strokeRect(s.x - 4, s.y - 4, s.w + 8, s.h + 8);
     ctx.setLineDash([]);
-    ctx.fillStyle = "#7c9cff";
+    ctx.fillStyle = "#b76e79";
     for (const { hx, hy } of HANDLES) {
       const px = s.x + s.w * hx;
       const py = s.y + s.h * hy;
@@ -227,14 +233,14 @@ export function DrawingCanvas({ value, onChange }: { value: string; onChange: (c
     if (sel) {
       const handle = handleAt(sel, px, py);
       if (handle) {
-        draftRef.current = { kind: "resize", id: sel.id, hx: handle.hx, hy: handle.hy, sx: sel.x, sy: sel.y, sw: sel.w, sh: sel.h };
+        draftRef.current = { kind: "resize", id: sel.id, hx: handle.hx, hy: handle.hy, sx: sel.x, sy: sel.y, sw: sel.w, sh: sel.h, before: docRef.current };
         return;
       }
     }
     const hit = hitShape(px, py);
     if (hit) {
       setSelectedId(hit.id);
-      draftRef.current = { kind: "move", id: hit.id, dx: px - hit.x, dy: py - hit.y };
+      draftRef.current = { kind: "move", id: hit.id, dx: px - hit.x, dy: py - hit.y, before: docRef.current };
       return;
     }
     setSelectedId(null);
@@ -302,7 +308,7 @@ export function DrawingCanvas({ value, onChange }: { value: string; onChange: (c
             strokes: docRef.current.strokes,
             shapes: [...docRef.current.shapes, {
               id: crypto.randomUUID(), kind: rec.kind, color: draft.color, width: draft.width,
-              x: Math.round(rec.x), y: Math.round(rec.y), w: Math.round(rec.w), h: Math.round(rec.h),
+               x: Math.round(rec.x), y: Math.round(rec.y), w: Math.round(rec.w), h: Math.round(rec.h), angle: rec.angle,
             }],
           });
           return;
@@ -313,7 +319,7 @@ export function DrawingCanvas({ value, onChange }: { value: string; onChange: (c
         shapes: docRef.current.shapes,
       });
     } else {
-      commit({ strokes: docRef.current.strokes, shapes: docRef.current.shapes });
+      commit({ strokes: docRef.current.strokes, shapes: docRef.current.shapes }, draft.before);
     }
   };
 

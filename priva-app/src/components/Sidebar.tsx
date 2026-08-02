@@ -1,7 +1,7 @@
 import React from "react";
 import {
   StickyNote, CheckSquare, ShoppingCart, Share2, MessageSquareText,
-  PanelLeftClose, Zap, Search,
+  PanelLeftClose, Zap, Search, LogOut,
 } from "lucide-react";
 import { useStore } from "../store";
 
@@ -19,7 +19,7 @@ const NAV_ITEMS: NavItem[] = [
   { id: "purchase-graph", label: "Purchase Graph", icon: <Share2 size={16} /> },
 ];
 
-export function Sidebar() {
+export function Sidebar({ onLogout }: { onLogout: () => void }) {
   const { activeWorld, sidebarOpen, setActiveWorld, setSidebarOpen, setCommandPaletteOpen } = useStore();
 
   if (!sidebarOpen) {
@@ -75,7 +75,7 @@ export function Sidebar() {
               </span>
               <span>{item.label}</span>
               {isActive && (
-                <span className="ml-auto w-1 h-4 rounded-full bg-gradient-to-b from-accent to-accent-bright shadow-[0_0_6px_rgba(139,92,246,0.5)]" />
+                <span className="ml-auto w-1 h-4 rounded-full bg-gradient-to-b from-accent to-accent-bright shadow-[0_0_6px_rgba(212,175,55,0.45)]" />
               )}
             </button>
           );
@@ -90,6 +90,13 @@ export function Sidebar() {
           <Zap size={12} className="text-accent" />
           <span>Quick Search</span>
           <kbd className="ml-auto text-[9px] text-text-muted bg-surface-4 px-1 py-0.5 rounded font-mono">⌘K</kbd>
+        </button>
+        <button
+          onClick={onLogout}
+          className="mt-1 w-full flex items-center gap-2 px-2.5 py-2 text-xs rounded-lg text-text-muted hover:bg-surface-3 hover:text-text-primary transition-all"
+        >
+          <LogOut size={12} />
+          <span>Log out</span>
         </button>
       </div>
     </div>

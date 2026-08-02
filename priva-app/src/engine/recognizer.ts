@@ -22,6 +22,8 @@ export interface RecognizedShape {
   y: number;
   w: number;
   h: number;
+  /** Direction for recognized arrows, in radians. */
+  angle?: number;
 }
 
 export const RECOGNIZE_THRESHOLD = 0.65;
@@ -195,6 +197,7 @@ export function recognizeStroke(points: Pt[]): RecognizedShape | null {
   // ---- Arrow: open stroke whose end forms a sharp V-triangle on a straight shaft ----
   if (!closed && simplified.length >= 4) {
     let best = 0;
+    let bestAngle = 0;
     for (const pts of [simplified, [...simplified].reverse()]) {
       const tri = endTriangle(pts);
       if (!tri) continue;
@@ -215,10 +218,13 @@ export function recognizeStroke(points: Pt[]): RecognizedShape | null {
       const headShare = (sides[0] + sides[1]) / (shaftLen + sides[0] + sides[1]);
       if (headShare > 0.45) continue;
       const confidence = Math.min(0.94, 0.62 + (1 - Math.abs(angle - 45) / 45) * 0.18 + (headShare < 0.3 ? 0.05 : 0));
-      if (confidence > best) best = confidence;
+      if (confidence > best) {
+        best = confidence;
+        bestAngle = Math.atan2(b.y - pts[0].y, b.x - pts[0].x);
+      }
     }
     if (best >= RECOGNIZE_THRESHOLD) {
-      return { kind: "arrow", confidence: best, ...bboxOf() };
+      return { kind: "arrow", confidence: best, angle: bestAngle, ...bboxOf() };
     }
   }
 

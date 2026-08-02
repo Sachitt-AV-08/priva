@@ -3,6 +3,7 @@ import { Search, ShoppingCart, Star, Command, Mic, MicOff } from "lucide-react";
 import { useStore } from "../store";
 import { api } from "../engine/apiClient";
 import { useSpeech } from "../hooks/useSpeech";
+import { openExternal } from "../engine/openExternal";
 
 export function CommandPalette() {
   const { commandPaletteOpen, setCommandPaletteOpen } = useStore();
@@ -11,20 +12,24 @@ export function CommandPalette() {
   const [loading, setLoading] = useState(false);
   const [selectedIdx, setSelectedIdx] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  const searchRequestRef = useRef(0);
 
   const speech = useSpeech((text) => {
     setQuery(text.trim());
-    void search(text.trim());
   });
 
   useEffect(() => {
     if (commandPaletteOpen) {
+      searchRequestRef.current += 1;
       setQuery("");
       setResults([]);
       setSelectedIdx(0);
       setTimeout(() => inputRef.current?.focus(), 50);
+    } else {
+      searchRequestRef.current += 1;
+      speech.cancel();
     }
-  }, [commandPaletteOpen]);
+  }, [commandPaletteOpen, speech.cancel]);
 
   useEffect(() => {
     if (!commandPaletteOpen) return;
@@ -36,16 +41,18 @@ export function CommandPalette() {
   }, [commandPaletteOpen, setCommandPaletteOpen]);
 
   const search = useCallback(async (q: string) => {
+    const requestId = ++searchRequestRef.current;
     if (!q.trim()) { setResults([]); return; }
     setLoading(true);
     try {
       const res = await api.searchProducts(q);
+      if (requestId !== searchRequestRef.current) return;
       setResults(res.products);
       setSelectedIdx(0);
     } catch {
-      setResults([]);
+      if (requestId === searchRequestRef.current) setResults([]);
     } finally {
-      setLoading(false);
+      if (requestId === searchRequestRef.current) setLoading(false);
     }
   }, []);
 
@@ -58,7 +65,7 @@ export function CommandPalette() {
     if (e.key === "ArrowDown") { e.preventDefault(); setSelectedIdx(i => Math.min(i + 1, results.length - 1)); }
     if (e.key === "ArrowUp") { e.preventDefault(); setSelectedIdx(i => Math.max(i - 1, 0)); }
     if (e.key === "Enter" && results[selectedIdx]) {
-      window.open(results[selectedIdx].product_url || results[selectedIdx].merchant_url, "_blank");
+      openExternal(results[selectedIdx].product_url || results[selectedIdx].merchant_url);
       setCommandPaletteOpen(false);
     }
   };
@@ -105,7 +112,7 @@ export function CommandPalette() {
             results.map((product, i) => (
               <button
                 key={product.id}
-                onClick={() => { window.open(product.product_url || product.merchant_url, "_blank"); setCommandPaletteOpen(false); }}
+                onClick={() => { openExternal(product.product_url || product.merchant_url); setCommandPaletteOpen(false); }}
                 className={`w-full flex items-center gap-3 px-4 py-2.5 text-left transition-colors ${
                   i === selectedIdx ? "bg-accent/10 text-text-primary" : "text-text-secondary hover:bg-surface-3"
                 }`}

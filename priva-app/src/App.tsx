@@ -56,6 +56,23 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    const handleUnauthorized = () => setAuthed(false);
+    window.addEventListener("priva:unauthorized", handleUnauthorized);
+    return () => window.removeEventListener("priva:unauthorized", handleUnauthorized);
+  }, []);
+
+  useEffect(() => {
+    if (!authed) return;
+    const verify = () => {
+      api.getMe()
+        .then((session) => { if (!session.authenticated) setAuthed(false); })
+        .catch(() => {});
+    };
+    const timer = window.setInterval(verify, 60000);
+    return () => window.clearInterval(timer);
+  }, [authed]);
+
+  useEffect(() => {
     if (authed === false) return;
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === "k") {
@@ -69,14 +86,22 @@ export function App() {
 
   if (authed === null) {
     return (
-      <div className="h-screen w-screen flex items-center justify-center bg-canvas">
-        <span className="text-text-muted text-sm animate-pulse">Connecting to PRIVA…</span>
+      <div className="h-screen w-screen flex flex-col bg-canvas">
+        <TitleBar showSearch={false} />
+        <div className="flex-1 flex items-center justify-center">
+          <span className="text-text-muted text-sm animate-pulse">Connecting to PRIVA…</span>
+        </div>
       </div>
     );
   }
 
   if (!authed) {
-    return <LoginScreen onLogin={() => setAuthed(true)} />;
+    return (
+      <div className="h-screen w-screen flex flex-col bg-canvas">
+        <TitleBar showSearch={false} />
+        <LoginScreen onLogin={() => setAuthed(true)} />
+      </div>
+    );
   }
 
   return (
@@ -84,7 +109,11 @@ export function App() {
       <div className="h-screen w-screen flex flex-col overflow-hidden bg-canvas">
         <TitleBar />
         <div className="flex-1 flex overflow-hidden">
-          <Sidebar />
+           <Sidebar onLogout={() => {
+             localStorage.removeItem("priva_token");
+             localStorage.removeItem("priva_user");
+             setAuthed(false);
+           }} />
           <div className="flex-1 flex flex-col overflow-hidden relative">
             <AnimatePresence mode="wait">
               <motion.div

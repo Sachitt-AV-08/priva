@@ -1,6 +1,6 @@
 {
   "name": "priva",
-  "version": "1.0.0",
+  "version": "1.1.1",
   "description": "PRIVA — Personal Retail Intelligence via Agent. iMessage-native AI assistant for shopping + productivity.",
   "author": "A V Sachitt",
   "license": "MIT",
@@ -21,7 +21,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "electron:dev": "vite",
+    "electron:dev": "node scripts/dev-electron.cjs",
     "electron:build": "vite build",
     "package": "electron-builder --win --config electron-builder.yml"
   },
@@ -44,6 +44,7 @@
     "@types/node": "^20.0.0",
     "@types/react": "^18.3.0",
     "@types/react-dom": "^18.3.0",
+    "@types/sql.js": "^1.4.11",
     "@vitejs/plugin-react": "^4.3.0",
     "autoprefixer": "^10.4.0",
     "concurrently": "^8.2.0",

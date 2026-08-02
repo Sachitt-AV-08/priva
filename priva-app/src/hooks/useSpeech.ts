@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { api } from "../engine/apiClient";
 
 export interface SpeechResult {
   transcript: string;
@@ -11,10 +12,10 @@ export interface UseSpeechReturn {
   error: string | null;
   start: () => Promise<void>;
   stop: () => Promise<SpeechResult | null>;
+  cancel: () => void;
   toggle: () => void;
 }
 
-const API = "http://localhost:8766";
 const TARGET_RATE = 16000;
 const MAX_SAMPLES = TARGET_RATE * 15; // 15s cap
 const MAX_SECONDS = 30; // auto-stop recording
@@ -39,12 +40,13 @@ export function useSpeech(onResult?: (text: string) => void): UseSpeechReturn {
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const stopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const requestControllerRef = useRef<AbortController | null>(null);
   const mountedRef = useRef(true);
   const onResultRef = useRef(onResult);
   onResultRef.current = onResult;
 
   // Never setState after unmount (React 18 would drop the tree silently).
-  const safeSet = <T,>(setter: React.Dispatch<React.SetStateAction<T>>, value: T) => {
+  const safeSet = (setter: React.Dispatch<React.SetStateAction<any>>, value: unknown) => {
     if (mountedRef.current) setter(value);
   };
 
@@ -70,44 +72,34 @@ export function useSpeech(onResult?: (text: string) => void): UseSpeechReturn {
     try {
       // Manual downsample device rate -> 16 kHz (linear interpolation per block).
       const ratio = srcRate / TARGET_RATE;
-      const out = new Float32Array(Math.min(MAX_SAMPLES, Math.floor(samples.length / ratio) + 1));
-      let acc = 0;
-      let written = 0;
-      for (let i = 0; i < samples.length && written < out.length; i++) {
-        acc += ratio;
-        while (acc >= 1) {
-          acc -= 1;
-          out[written++] = samples[i];
-        }
+      const outputLength = Math.min(MAX_SAMPLES, Math.floor(samples.length / ratio));
+      const out = new Float32Array(outputLength);
+      for (let written = 0; written < outputLength; written++) {
+        const sourcePosition = written * ratio;
+        const left = Math.floor(sourcePosition);
+        const right = Math.min(left + 1, samples.length - 1);
+        const mix = sourcePosition - left;
+        out[written] = samples[left] * (1 - mix) + samples[right] * mix;
       }
-      if (written < TARGET_RATE * 0.1) return null;
-      const pcm = new Int16Array(written);
-      for (let i = 0; i < written; i++) {
+      if (outputLength < TARGET_RATE * 0.1) return null;
+      const pcm = new Int16Array(outputLength);
+      for (let i = 0; i < outputLength; i++) {
         const s = Math.max(-1, Math.min(1, out[i]));
         pcm[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
       }
       // Hard timeout so a stuck backend can never leave the UI in "busy".
       const ctrl = new AbortController();
+      requestControllerRef.current = ctrl;
       const timer = setTimeout(() => ctrl.abort(), 60000);
-      let res: Response;
       try {
-        res = await fetch(`${API}/api/voice/stt`, {
-          method: "POST",
-          headers: { "Content-Type": "application/octet-stream" },
-          body: pcm.buffer,
-          signal: ctrl.signal,
-        });
+        const data = await api.speechToText(pcm.buffer as ArrayBuffer, ctrl.signal);
+        const text: string = data.text ?? "";
+        if (text.trim() && onResultRef.current) onResultRef.current(text);
+        return { transcript: text };
       } finally {
         clearTimeout(timer);
+        if (requestControllerRef.current === ctrl) requestControllerRef.current = null;
       }
-      if (!res.ok) {
-        safeSet(setError, `STT failed (${res.status})`);
-        return { transcript: "", error: `STT failed (${res.status})` };
-      }
-      const data = await res.json();
-      const text: string = data.text ?? "";
-      if (text.trim() && onResultRef.current) onResultRef.current(text);
-      return { transcript: text };
     } catch (e) {
       if (e instanceof DOMException && e.name === "AbortError") {
         safeSet(setError, "STT timed out — is the PRIVA backend running?");
@@ -128,8 +120,8 @@ export function useSpeech(onResult?: (text: string) => void): UseSpeechReturn {
       stopTimerRef.current = null;
     }
     const chunks = chunksRef.current;
-    chunksRef.current = [];
     if (!recorder || recorder.state === "inactive") {
+      chunksRef.current = [];
       safeSet(setListening, false);
       return null;
     }
@@ -146,6 +138,7 @@ export function useSpeech(onResult?: (text: string) => void): UseSpeechReturn {
         resolve(null);
       }
     });
+    chunksRef.current = [];
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
     safeSet(setListening, false);
@@ -187,10 +180,32 @@ export function useSpeech(onResult?: (text: string) => void): UseSpeechReturn {
     else void start().catch(() => undefined);
   }, [listening, start, stop]);
 
+  const cancel = useCallback(() => {
+    if (stopTimerRef.current) {
+      clearTimeout(stopTimerRef.current);
+      stopTimerRef.current = null;
+    }
+    requestControllerRef.current?.abort();
+    requestControllerRef.current = null;
+    const recorder = recorderRef.current;
+    recorderRef.current = null;
+    if (recorder && recorder.state !== "inactive") {
+      recorder.ondataavailable = null;
+      recorder.onstop = null;
+      try { recorder.stop(); } catch { /* noop */ }
+    }
+    chunksRef.current = [];
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    streamRef.current = null;
+    safeSet(setListening, false);
+    safeSet(setBusy, false);
+  }, []);
+
   useEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+      requestControllerRef.current?.abort();
       if (stopTimerRef.current) clearTimeout(stopTimerRef.current);
       if (recorderRef.current && recorderRef.current.state !== "inactive") {
         try {
@@ -203,5 +218,5 @@ export function useSpeech(onResult?: (text: string) => void): UseSpeechReturn {
     };
   }, []);
 
-  return { listening, busy, error, start, stop, toggle };
+  return { listening, busy, error, start, stop, cancel, toggle };
 }

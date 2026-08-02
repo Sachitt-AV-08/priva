@@ -31,7 +31,7 @@ export interface World {
 
   Sidebar?: React.FC<{ ctx: WorldContext }>;
   Toolbar?: React.FC<{ ctx: WorldContext }>;
-  Content: React.FC<{ ctx: WorldContext }>;
+  Content: React.FC<{ ctx?: WorldContext }>;
   StatusBar?: React.FC;
   commands?: WorldCommand[];
 }

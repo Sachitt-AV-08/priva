@@ -16,10 +16,13 @@ function ChatContent() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const boxRef = useRef<HTMLDivElement>(null);
+  const transcriptVersion = useRef(0);
 
   const load = useCallback(async () => {
+    const version = transcriptVersion.current;
     try {
       const body = await api.getTranscript();
+      if (version !== transcriptVersion.current) return;
       const merged = [
         ...(body.inbound || []).map((m) => ({ dir: "in" as const, text: m.text, ts: m.ts })),
         ...(body.messages || []).map((m) => ({ dir: "out" as const, text: m.text, ts: m.ts })),
@@ -31,9 +34,17 @@ function ChatContent() {
   }, []);
 
   useEffect(() => {
-    load();
-    const t = window.setInterval(load, 3000);
-    return () => window.clearInterval(t);
+    let stopped = false;
+    let timer = 0;
+    const poll = async () => {
+      await load();
+      if (!stopped) timer = window.setTimeout(poll, 3000);
+    };
+    void poll();
+    return () => {
+      stopped = true;
+      window.clearTimeout(timer);
+    };
   }, [load]);
 
   useEffect(() => {
@@ -45,6 +56,7 @@ function ChatContent() {
     if (!t || busy) return;
     setBusy(true);
     setError("");
+    transcriptVersion.current += 1;
     try {
       const res = await api.sendSms(t);
       if (!res.sent) setError(res.error || "Send failed — backend off?");
@@ -62,6 +74,7 @@ function ChatContent() {
     if (!t || busy) return;
     setBusy(true);
     setError("");
+    transcriptVersion.current += 1;
     try {
       await api.simulateReply(t);
       setSim("");
@@ -74,11 +87,13 @@ function ChatContent() {
   };
 
   const clear = async () => {
+    if (!rows.length || !window.confirm("Clear this Linq conversation?")) return;
+    transcriptVersion.current += 1;
     try {
       await api.clearTranscript();
-      await load();
-    } catch {
-      /* ignore */
+      setRows([]);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Conversation could not be cleared");
     }
   };
 
@@ -92,6 +107,7 @@ function ChatContent() {
         </div>
         <button
           onClick={clear}
+          disabled={!rows.length || busy}
           className="flex items-center gap-1.5 text-[11px] text-text-muted hover:text-text-secondary px-2 py-1 rounded-lg hover:bg-surface-3 transition-all"
         >
           <Eraser size={12} /> Clear
@@ -109,12 +125,12 @@ function ChatContent() {
             <div
               className={`max-w-[75%] px-3.5 py-2 rounded-2xl text-[13px] leading-relaxed ${
                 m.dir === "out"
-                  ? "bg-gradient-to-r from-accent to-accent-bright text-white rounded-br-md shadow-[0_2px_12px_rgba(139,92,246,0.25)]"
+                  ? "bg-gradient-to-r from-accent to-accent-bright text-white rounded-br-md shadow-[0_2px_12px_rgba(212,175,55,0.20)]"
                   : "bg-surface-3 text-text-primary rounded-bl-md"
               }`}
             >
               <div className="break-words whitespace-pre-wrap">{m.text}</div>
-              <div className={`text-[9px] mt-1 ${m.dir === "out" ? "text-white/60" : "text-text-muted"}`}>
+              <div className={`text-[9px] mt-1 ${m.dir === "out" ? "text-[#14120b]/65" : "text-text-muted"}`}>
                 {m.dir === "out" ? "PRIVA → your phone" : "you → PRIVA"} · {fmt(m.ts)}
               </div>
             </div>
@@ -164,9 +180,9 @@ function ChatContent() {
 export const ChatWorld: World = {
   id: "chat",
   label: "Chat",
-  icon: "💬",
+  icon: "chat",
   category: "utilities",
-  accentColor: "#22d3ee",
+  accentColor: "#d4af37",
   description: "The live SMS conversation — mirrored with your phone and the web app.",
   Content: ChatContent,
 };

@@ -1,5 +1,6 @@
 import { db } from "./database";
 import { generateId, now, parseProperties, serializeProperties, type Node, type NodeType, type NodeProperties } from "./types";
+import { generateKeyBetween } from "fractional-indexing";
 
 class NodeService {
   async create(type: NodeType, props: NodeProperties = {}, content?: string, parentId?: string, rootId?: string): Promise<Node> {
@@ -8,17 +9,24 @@ class NodeService {
       [parentId || null]
     );
     const lastKey = siblings[0]?.sort_key || "";
-    const sortKey = incrementSortKey(lastKey);
+    const sortKey = generateKeyBetween(lastKey || null, null);
+    let resolvedRootId = rootId;
+    if (!resolvedRootId && parentId) {
+      const parent = await this.get(parentId);
+      resolvedRootId = parent?.root_id || parent?.id;
+    }
 
     const id = generateId();
     const ts = now();
 
     await db.execute(
       "INSERT INTO nodes (id, type, parent_id, root_id, sort_key, properties, content, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-      [id, type, parentId || null, rootId || parentId || null, sortKey, serializeProperties(props), content || null, ts, ts]
+      [id, type, parentId || null, resolvedRootId || null, sortKey, serializeProperties(props), content || null, ts, ts]
     );
 
-    return this.get(id)!;
+    const created = await this.get(id);
+    if (!created) throw new Error(`Node ${id} was not created`);
+    return created;
   }
 
   async get(id: string): Promise<Node | undefined> {
@@ -91,13 +99,6 @@ class NodeService {
       [limit]
     );
   }
-}
-
-function incrementSortKey(last: string): string {
-  if (!last) return "a0";
-  const num = parseInt(last.replace(/[a-z]/gi, ""), 10) || 0;
-  const prefix = last.replace(/[0-9]+.*$/, "");
-  return `${prefix}${num + 1}`;
 }
 
 export const nodeService = new NodeService();

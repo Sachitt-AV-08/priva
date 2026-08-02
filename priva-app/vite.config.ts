@@ -8,6 +8,9 @@ try {
   electronPlugin = electron([
     {
       entry: "electron/main.ts",
+      onstart(args) {
+        if (process.env.ELECTRON_START === "1") args.startup();
+      },
       vite: {
         build: {
           outDir: "dist-electron",

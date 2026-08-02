@@ -4,24 +4,63 @@ import {
   Flag, Calendar, Search,
 } from "lucide-react";
 import type { Task } from "../../engine/types";
+import { api } from "../../engine/apiClient";
 
-const STORAGE_KEY = "priva_tasks";
+const LEGACY_STORAGE_KEY = "priva_tasks";
+
+function storageKey() {
+  return `${LEGACY_STORAGE_KEY}_${api.getCurrentUser()?.user_id || "local"}`;
+}
 
 function loadTasks(): Task[] {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : [];
+    const key = storageKey();
+    const scoped = localStorage.getItem(key);
+    const raw = scoped ?? localStorage.getItem(LEGACY_STORAGE_KEY);
+    if (raw && !scoped) localStorage.setItem(key, raw);
+    const parsed = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(parsed)) return [];
+    const seen = new Set<string>();
+    return parsed
+      .filter((item) => item && typeof (item.title || item.text) === "string")
+      .map((item, index) => {
+        const candidate = typeof item.id === "string" && item.id ? item.id : `task-${index}`;
+        const id = seen.has(candidate) ? `${candidate}-${index}` : candidate;
+        seen.add(id);
+        const priority = String(item.priority || "p3").toLowerCase();
+        return {
+          id,
+          title: String(item.title || item.text).trim(),
+          description: typeof item.description === "string" ? item.description : "",
+          priority: (["p1", "p2", "p3", "p4"].includes(priority) ? priority : "p3") as Task["priority"],
+          completed: Boolean(item.completed ?? item.done),
+          due_date: typeof item.due_date === "string" ? item.due_date : null,
+          tags: Array.isArray(item.tags) ? item.tags : [],
+          created_at: Number(item.created_at || Date.now()),
+          updated_at: Number(item.updated_at || Date.now()),
+        };
+      })
+      .filter((task) => task.title);
   } catch { return []; }
 }
 
 function saveTasks(tasks: Task[]) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks));
+  try {
+    localStorage.setItem(storageKey(), JSON.stringify(tasks.map((task) => ({
+      ...task,
+      text: task.title,
+      done: task.completed,
+      priority: task.priority.toUpperCase(),
+    }))));
+  } catch {
+    // Keep the in-memory task list usable if local storage is unavailable.
+  }
 }
 
 const PRIORITY_COLORS: Record<string, string> = {
-  p1: "#ef4444",
-  p2: "#f59e0b",
-  p3: "#3b82f6",
+  p1: "#e5484d",
+  p2: "#d4af37",
+  p3: "#a0a0a0",
   p4: "#6b7280",
 };
 

@@ -1,11 +1,46 @@
 const API_BASES = [
   (import.meta.env.VITE_API_BASE as string | undefined)?.replace(/\/+$/, ""),
+  "http://localhost:8766",
   "https://priva-backend.onrender.com",
   "https://mollusk-anytime-handcraft.ngrok-free.dev",
-  "http://localhost:8766",
 ].filter((x): x is string => Boolean(x));
 
 let apiBase: string | null = null;
+const USER_KEY = "priva_user";
+
+export interface AuthUser {
+  user_id: string;
+  name: string;
+  phone: string;
+  is_admin: boolean;
+}
+
+function baseHeaders(base: string, initial?: HeadersInit) {
+  const headers = new Headers(initial);
+  if (base.includes("ngrok")) headers.set("ngrok-skip-browser-warning", "true");
+  return headers;
+}
+
+function storeUser(user: AuthUser | null) {
+  if (user) localStorage.setItem(USER_KEY, JSON.stringify(user));
+  else localStorage.removeItem(USER_KEY);
+}
+
+function currentUser(): AuthUser | null {
+  try {
+    const raw = localStorage.getItem(USER_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function currentThread() {
+  const user = currentUser();
+  return user?.user_id && user.user_id !== "local"
+    ? `priva_mirror_${user.user_id}`
+    : "priva_mirror";
+}
 
 async function resolveApi(): Promise<string> {
   if (apiBase) return apiBase;
@@ -13,7 +48,10 @@ async function resolveApi(): Promise<string> {
     try {
       const ctrl = new AbortController();
       const timer = setTimeout(() => ctrl.abort(), 4000);
-      const res = await fetch(`${base}/health`, { signal: ctrl.signal });
+      const res = await fetch(`${base}/health`, {
+        signal: ctrl.signal,
+        headers: baseHeaders(base),
+      });
       clearTimeout(timer);
       if (res.ok) {
         apiBase = base;
@@ -23,18 +61,38 @@ async function resolveApi(): Promise<string> {
       /* try next candidate */
     }
   }
-  apiBase = API_BASES[0];
-  return apiBase;
+  throw new Error("PRIVA backend is unreachable");
 }
 
 async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
-  const headers = new Headers(init?.headers);
-  const token = localStorage.getItem("priva_token") || "";
-  if (token) headers.set("Authorization", `Bearer ${token}`);
-  if (init?.body && !headers.has("Content-Type")) {
-    headers.set("Content-Type", "application/json");
+  const method = (init?.method || "GET").toUpperCase();
+  const tokenAtStart = localStorage.getItem("priva_token") || "";
+  const request = async (base: string) => {
+    const headers = baseHeaders(base, init?.headers);
+    const token = localStorage.getItem("priva_token") || "";
+    if (token) headers.set("Authorization", `Bearer ${token}`);
+    if (init?.body && !headers.has("Content-Type")) {
+      headers.set("Content-Type", "application/json");
+    }
+    return fetch(`${base}${path}`, { ...init, headers });
+  };
+
+  let response: Response;
+  const base = await resolveApi();
+  try {
+    response = await request(base);
+  } catch (error) {
+    if (tokenAtStart || !["GET", "HEAD", "OPTIONS"].includes(method)) throw error;
+    apiBase = null;
+    response = await request(await resolveApi());
   }
-  return fetch(`${await resolveApi()}${path}`, { ...init, headers });
+
+  if (response.status === 401) {
+    localStorage.removeItem("priva_token");
+    storeUser(null);
+    window.dispatchEvent(new Event("priva:unauthorized"));
+  }
+  return response;
 }
 
 export interface ProductResult {
@@ -170,6 +228,8 @@ export interface SpendAnalysis {
 }
 
 export const api = {
+  getCurrentUser: currentUser,
+  getThreadId: currentThread,
   requestOtp: async (phone: string, name: string): Promise<{ otp?: string; delivery: string; user_id: string }> => {
     const res = await apiFetch("/api/auth/otp", {
       method: "POST",
@@ -190,6 +250,7 @@ export const api = {
     const body = await res.json();
     if (!res.ok) throw new Error(body.detail || "Invalid code");
     localStorage.setItem("priva_token", body.token);
+    storeUser({ user_id: body.user_id, name: body.name, phone: body.phone, is_admin: body.is_admin });
     return body;
   },
 
@@ -201,13 +262,20 @@ export const api = {
     const body = await res.json();
     if (!res.ok) throw new Error(body.detail || "Login failed");
     localStorage.setItem("priva_token", body.token);
+    storeUser({ user_id: body.user_id, name: body.name, phone: body.phone || "", is_admin: body.is_admin });
     return body;
   },
 
-  getMe: async (): Promise<{ user: { user_id: string; name: string; phone: string; is_admin: boolean } | null; authenticated: boolean }> => {
+  getMe: async (): Promise<{ user: AuthUser | null; authenticated: boolean }> => {
     const res = await apiFetch("/api/auth/me");
-    if (!res.ok) return { user: null, authenticated: false };
-    return res.json();
+    if (!res.ok) {
+      storeUser(null);
+      return { user: null, authenticated: false };
+    }
+    const body = await res.json();
+    storeUser(body.authenticated ? body.user : null);
+    if (!body.authenticated) localStorage.removeItem("priva_token");
+    return body;
   },
 
   sendSms: async (text: string): Promise<{ ok: boolean; sent: boolean; error?: string }> => {
@@ -242,7 +310,7 @@ export const api = {
     const res = await apiFetch("/api/pay", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(product),
+      body: JSON.stringify({ ...product, user_id: currentUser()?.user_id }),
     });
     if (!res.ok) {
       let detail = "";
@@ -284,8 +352,9 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ session_id: sessionId, transaction_id: transactionId, amount, budget_excess: budgetExcess }),
     });
-    if (!res.ok) throw new Error(`Complete failed: ${res.status}`);
-    return res.json();
+    const body = await res.json();
+    if (!res.ok || body.error) throw new Error(body.error || `Complete failed: ${res.status}`);
+    return body;
   },
 
   refreshTransactions: async (): Promise<TransactionsResponse> => {
@@ -346,7 +415,7 @@ export const api = {
     return res.json();
   },
 
-  getTranscript: async (threadId: string = ""): Promise<{
+  getTranscript: async (threadId: string = currentThread()): Promise<{
     messages: { to: string; text: string; thread_id: string; ts: number }[];
     inbound: { from: string; text: string; thread_id: string; ts: number }[];
   }> => {
@@ -356,7 +425,7 @@ export const api = {
     return res.json();
   },
 
-  simulateReply: async (text: string, threadId: string = "priva_mirror"): Promise<{ result: string }> => {
+  simulateReply: async (text: string, threadId: string = currentThread()): Promise<{ result: string }> => {
     const res = await apiFetch("/api/linq/simulate-reply", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -410,11 +479,12 @@ export const api = {
     return res.json();
   },
 
-  speechToText: async (pcm16: ArrayBuffer): Promise<{ text: string }> => {
+  speechToText: async (pcm16: ArrayBuffer, signal?: AbortSignal): Promise<{ text: string }> => {
     const res = await apiFetch("/api/voice/stt", {
       method: "POST",
       headers: { "Content-Type": "application/octet-stream" },
       body: pcm16,
+      signal,
     });
     if (!res.ok) throw new Error(`STT failed: ${res.status}`);
     return res.json();
@@ -426,7 +496,7 @@ export const api = {
     return res.blob();
   },
 
-  clearTranscript: async (threadId: string = ""): Promise<{ cleared: number }> => {
+  clearTranscript: async (threadId: string = currentThread()): Promise<{ ok: boolean; removed: number }> => {
     const qs = threadId ? `?thread_id=${encodeURIComponent(threadId)}` : "";
     const res = await apiFetch(`/api/linq/transcript${qs}`, { method: "DELETE" });
     if (!res.ok) throw new Error(`Clear failed: ${res.status}`);

@@ -11,6 +11,7 @@ import type { Product } from "../../engine/types";
 import { api, type PayResponse, type ProductResult, type TransactionResult, type ActivityEvent, type BudgetState, type SpendAnalysis } from "../../engine/apiClient";
 import { SkeletonGrid } from "../../components/LoadingSkeleton";
 import { useSpeech } from "../../hooks/useSpeech";
+import { openExternal } from "../../engine/openExternal";
 
 const PRAVA_PUBKEY_KEY = "priva_prava_publishable_key";
 const TEST_CARD = { number: "4622 9431 2323 2341", cvv: "450", expiry: "12/30", otp: "456789" };
@@ -30,7 +31,7 @@ function ProductCard({ product, onBuy, disabled }: { product: Product; onBuy: (p
       custom={parseInt(product.id) || 0}
       initial="hidden"
       animate="visible"
-      className="card p-0 overflow-hidden hover:border-accent/30 hover:shadow-[0_0_20px_rgba(139,92,246,0.08)] transition-all duration-200 group"
+      className="card p-0 overflow-hidden hover:border-accent/30 hover:shadow-[0_0_20px_rgba(212,175,55,0.08)] transition-all duration-200 group"
     >
       <div className="w-full h-36 bg-surface-3 flex items-center justify-center overflow-hidden">
         {product.image_url ? (
@@ -104,11 +105,12 @@ function CheckoutModal({ product, onClose, onPaid, publishableKey }: {
     setPhase("completing");
     try {
       await api.payComplete(sid, txnId, amount, overspendRef.current?.excess);
-    } catch {
-      // server will reconcile via /api/transactions/refresh
+      setPhase("done");
+      onPaid();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Payment completion could not be confirmed.");
+      setPhase("error");
     }
-    setPhase("done");
-    onPaid();
   }, [onPaid]);
 
   const startPayment = useCallback(async () => {
@@ -133,7 +135,7 @@ function CheckoutModal({ product, onClose, onPaid, publishableKey }: {
       if (res.session_token && res.iframe_url) {
         setPhase("card");
       } else if (res.payment_url) {
-        window.open(res.payment_url, "_blank");
+        openExternal(res.payment_url);
         setPhase("done");
         onPaid();
       } else {
@@ -164,7 +166,7 @@ function CheckoutModal({ product, onClose, onPaid, publishableKey }: {
 
     const key = publishableKey || localStorage.getItem(PRAVA_PUBKEY_KEY) || "";
     if (!key) {
-      window.open(session.iframe_url, "_blank");
+      openExternal(session.iframe_url);
       setPhase("done");
       onPaid();
       return;
@@ -571,6 +573,7 @@ function LinqMirrorChat() {
   ttsOnRef.current = ttsOn;
   const lastSpokenRef = useRef("");
   const busyRef = useRef(false);
+  const transcriptVersionRef = useRef(0);
 
   const speech = useSpeech((text) => {
     setInput(text);
@@ -590,8 +593,10 @@ function LinqMirrorChat() {
   }, []);
 
   const poll = useCallback(async () => {
+    const version = transcriptVersionRef.current;
     try {
-      const res = await api.getTranscript("priva_mirror");
+      const res = await api.getTranscript();
+      if (version !== transcriptVersionRef.current) return;
       const seen = new Set<string>();
       const next: { text: string; from: "user" | "agent"; ts: number }[] = [];
       const add = (m: { text: string; ts: number }, from: "user" | "agent") => {
@@ -603,16 +608,24 @@ function LinqMirrorChat() {
       for (const m of res.messages ?? []) add(m, "agent");
       for (const m of res.inbound ?? []) add(m, "user");
       next.sort((a, b) => a.ts - b.ts || (a.from === b.from ? 0 : a.from === "user" ? -1 : 1));
-      setMessages(next.length ? next : (m) => m);
+      setMessages(next);
       const lastAgent = [...next].reverse().find((m) => m.from === "agent");
       if (lastAgent && lastAgent.text !== lastSpokenRef.current) void speak(lastAgent.text);
     } catch { /* backend down */ }
   }, [speak]);
 
   useEffect(() => {
-    poll();
-    const id = setInterval(poll, 2000);
-    return () => clearInterval(id);
+    let stopped = false;
+    let timer = 0;
+    const run = async () => {
+      await poll();
+      if (!stopped) timer = window.setTimeout(run, 2000);
+    };
+    void run();
+    return () => {
+      stopped = true;
+      window.clearTimeout(timer);
+    };
   }, [poll]);
 
   const nearBottom = () => {
@@ -628,6 +641,7 @@ function LinqMirrorChat() {
     if (!text || busyRef.current) return;
     setInput("");
     busyRef.current = true;
+    transcriptVersionRef.current += 1;
     setBusy(true);
     try {
       await api.simulateReply(text);
@@ -642,8 +656,9 @@ function LinqMirrorChat() {
 
   const clearChat = async () => {
     if (!window.confirm("Clear the entire Linq mirror conversation?")) return;
+    transcriptVersionRef.current += 1;
     try {
-      await api.clearTranscript("priva_mirror");
+      await api.clearTranscript();
       setMessages([]);
     } catch { /* backend down */ }
   };
@@ -763,19 +778,25 @@ export function CommerceWorld() {
   const [publishableKey, setPublishableKey] = useState("");
   const [linqNumber, setLinqNumber] = useState("");
   const [copiedTxn, setCopiedTxn] = useState("");
+  const searchRequestRef = useRef(0);
 
-  const handleSearch = useCallback(async () => {
-    if (!searchQuery.trim()) return;
+  const handleSearch = useCallback(async (queryOverride?: string) => {
+    const query = (queryOverride ?? searchQuery).trim();
+    if (!query) return;
+    const requestId = ++searchRequestRef.current;
     setIsSearching(true);
     try {
-      const res = await api.searchProducts(searchQuery);
+      const res = await api.searchProducts(query);
+      if (requestId !== searchRequestRef.current) return;
       setProducts(res.products.map(mapProduct));
       setSearched(true);
     } catch {
-      setProducts([]);
-      setSearched(true);
+      if (requestId === searchRequestRef.current) {
+        setProducts([]);
+        setSearched(true);
+      }
     } finally {
-      setIsSearching(false);
+      if (requestId === searchRequestRef.current) setIsSearching(false);
     }
   }, [searchQuery]);
 
@@ -809,8 +830,9 @@ export function CommerceWorld() {
   const handleStatusRefresh = useCallback(async () => {
     setIsRefreshing(true);
     try {
-      const res = await api.refreshTransactions();
-      setPurchases(res.transactions.map(mapTransaction));
+      await api.refreshTransactions();
+      const scoped = await api.getTransactions();
+      setPurchases(scoped.transactions.map(mapTransaction));
     } catch {
       loadTransactions();
     } finally {
@@ -905,7 +927,7 @@ export function CommerceWorld() {
                 />
               </div>
               <button
-                onClick={handleSearch}
+                onClick={() => void handleSearch()}
                 disabled={isSearching || !searchQuery.trim()}
                 className="px-3 py-2 bg-accent text-white rounded-lg text-xs font-medium hover:bg-accent-hover active:bg-accent-dim transition-all disabled:opacity-40 flex items-center gap-1"
               >
@@ -962,7 +984,7 @@ export function CommerceWorld() {
                     {["wireless headphones", "running shoes", "mechanical keyboard", "usb hub"].map((suggestion) => (
                       <button
                         key={suggestion}
-                        onClick={() => { setSearchQuery(suggestion); handleSearch(); }}
+                        onClick={() => { setSearchQuery(suggestion); void handleSearch(suggestion); }}
                         className="px-2.5 py-1.5 text-[10px] bg-surface-3 border border-border rounded-lg text-text-muted hover:text-text-secondary hover:border-border-active transition-all"
                       >
                         {suggestion}

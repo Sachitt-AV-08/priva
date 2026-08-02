@@ -4,26 +4,26 @@
 
 @layer base {
   :root {
-    --canvas: #08090a;
-    --surface-1: #0f1113;
-    --surface-2: #181a1e;
-    --surface-3: #1f2126;
-    --surface-4: #282a30;
-    --surface-5: #32343c;
-    --accent: #8b5cf6;
-    --accent-hover: #7c3aed;
-    --accent-dim: #6d28d9;
-    --accent-bright: #a78bfa;
-    --accent-green: #22c55e;
-    --accent-orange: #f59e0b;
-    --accent-red: #ef4444;
-    --accent-pink: #ec4899;
-    --accent-cyan: #06b6d4;
-    --text-primary: #f0f0f0;
-    --text-secondary: #8b8d97;
-    --text-muted: #55575f;
-    --border: rgba(255, 255, 255, 0.06);
-    --border-active: rgba(255, 255, 255, 0.12);
+    --canvas: #090909;
+    --surface-1: #101010;
+    --surface-2: #171717;
+    --surface-3: #1d1d1d;
+    --surface-4: #242424;
+    --surface-5: #303030;
+    --accent: #d4af37;
+    --accent-hover: #efcf6a;
+    --accent-dim: #a67c00;
+    --accent-bright: #b76e79;
+    --accent-green: #4caf50;
+    --accent-orange: #d4af37;
+    --accent-red: #e5484d;
+    --accent-pink: #b76e79;
+    --accent-cyan: #efcf6a;
+    --text-primary: #f4f4f4;
+    --text-secondary: #a0a0a0;
+    --text-muted: #858585;
+    --border: rgba(212, 175, 55, 0.15);
+    --border-active: rgba(212, 175, 55, 0.34);
   }
 
   * {
@@ -58,7 +58,7 @@
   }
 
   ::selection {
-    background: rgba(139, 92, 246, 0.3);
+    background: rgba(212, 175, 55, 0.24);
   }
 
   input::placeholder,
@@ -159,4 +159,79 @@
   .macos-dot:hover {
     filter: brightness(1.3);
   }
+}
+
+.priva-logo {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--accent-hover);
+}
+
+.priva-logo-mark {
+  display: block;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
+  overflow: hidden;
+  border-radius: 6px;
+  background: #070707;
+}
+
+.priva-logo-mark img {
+  display: block;
+  width: 69px;
+  max-width: none;
+  height: 69px;
+  transform: translate(-20px, -11px);
+}
+
+.priva-wordmark {
+  font-family: Sora, Inter, sans-serif;
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 0.15em;
+}
+
+.priva-logo-small .priva-logo-mark {
+  width: 24px;
+  height: 24px;
+  flex-basis: 24px;
+}
+
+.priva-logo-small .priva-logo-mark img {
+  width: 55px;
+  height: 55px;
+  transform: translate(-16px, -9px);
+}
+
+.priva-logo-small .priva-wordmark {
+  font-size: 12px;
+}
+
+.priva-logo-large {
+  flex-direction: column;
+  gap: 11px;
+}
+
+.priva-logo-large .priva-logo-mark {
+  width: 88px;
+  height: 88px;
+  flex-basis: 88px;
+  border-radius: 10px;
+}
+
+.priva-logo-large .priva-logo-mark img {
+  width: 202px;
+  height: 202px;
+  transform: translate(-57px, -31px);
+}
+
+.priva-logo-large .priva-wordmark {
+  font-size: 16px;
+}
+
+.bg-accent.text-white,
+[class*="from-accent"][class*="to-accent-bright"].text-white {
+  color: #14120b !important;
 }

@@ -8,7 +8,7 @@ import type { NoteBlock } from "../../engine/types";
 import { api, type NoteResult, type NoteAnalysis, type ReminderResult, type ActivityEvent } from "../../engine/apiClient";
 import { DrawingCanvas } from "../../components/DrawingCanvas";
 
-const STORAGE_KEY = "priva_notes";
+const LEGACY_STORAGE_KEY = "priva_notes";
 const AUTHORS = { NOTE: "NOTE ANALYZER", LINQ: "LINQ", SERP: "SERPAPI", RANK: "RANKER", PRAVA: "PRAVA", PAID: "PAID" };
 
 interface StoredNote extends NoteResult {
@@ -17,15 +17,30 @@ interface StoredNote extends NoteResult {
   reminders?: ReminderResult[];
 }
 
+function storageKey() {
+  return `${LEGACY_STORAGE_KEY}_${api.getCurrentUser()?.user_id || "local"}`;
+}
+
+function normalizedTime(value: number) {
+  return value < 1e12 ? value * 1000 : value;
+}
+
 function loadNotes(): StoredNote[] {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const key = storageKey();
+    const scoped = localStorage.getItem(key);
+    const raw = scoped ?? localStorage.getItem(LEGACY_STORAGE_KEY);
+    if (raw && !scoped) localStorage.setItem(key, raw);
     return raw ? JSON.parse(raw) : [];
   } catch { return []; }
 }
 
 function saveNotes(notes: StoredNote[]) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(notes));
+  try {
+    localStorage.setItem(storageKey(), JSON.stringify(notes));
+  } catch {
+    // Keep the in-memory editor usable when storage is unavailable.
+  }
 }
 
 function NoteBlockEditor({ block, onChange, onDelete }: {
@@ -40,7 +55,7 @@ function NoteBlockEditor({ block, onChange, onDelete }: {
   if (block.type === "drawing") {
     return (
       <div className="group flex items-start gap-2">
-        <div className="mt-1.5 text-text-muted text-[10px] w-4 text-right font-mono opacity-0 group-hover:opacity-100 transition-opacity">✎</div>
+        <div className="mt-1.5 text-text-muted text-[10px] w-4 flex justify-end opacity-0 group-hover:opacity-100 transition-opacity"><Pen size={10} /></div>
         <div className="flex-1 min-w-0">
           <DrawingCanvas value={block.content} onChange={(content) => onChange(block.id, content)} />
         </div>
@@ -229,15 +244,15 @@ function noteSnippet(note: StoredNote): string {
 }
 
 const AGENT_COLORS: Record<string, string> = {
-  "NOTE ANALYZER": "text-emerald-400",
-  LINQ: "text-sky-400",
-  SERPAPI: "text-violet-400",
-  RANKER: "text-amber-400",
-  PRAVA: "text-rose-400",
+  "NOTE ANALYZER": "text-accent",
+  LINQ: "text-accent-bright",
+  SERPAPI: "text-accent-bright",
+  RANKER: "text-accent",
+  PRAVA: "text-accent-bright",
   PAID: "text-accent-green",
-  REMINDER: "text-orange-400",
-  DELIVERY: "text-cyan-400",
-  "PRICE WATCH": "text-fuchsia-400",
+  REMINDER: "text-accent",
+  DELIVERY: "text-accent-green",
+  "PRICE WATCH": "text-accent-bright",
 };
 
 const AGENT_ACTIONS: Record<string, string> = {
@@ -299,7 +314,7 @@ function NoteTracePanel({ noteId }: { noteId: string | null }) {
                 done ? "bg-accent/10 border-accent/30 text-accent" : "border-border text-text-muted/60"
               }`}
             >
-              {done ? "✓ " : ""}{s.label}
+              {done && <CheckCircle size={8} className="inline mr-1" />}{s.label}
             </span>
           );
         })}
@@ -353,19 +368,57 @@ export function NotesWorld() {
   const [reminders, setReminders] = useState<ReminderResult[]>([]);
   const syncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const pushToBackend = useCallback((next: StoredNote[]) => {
+  const pushToBackend = useCallback((next: StoredNote[], changed?: StoredNote) => {
     saveNotes(next);
     if (syncTimer.current) clearTimeout(syncTimer.current);
+    if (!changed) return;
+    const originUser = api.getCurrentUser()?.user_id || "local";
+    const originToken = localStorage.getItem("priva_token");
     syncTimer.current = setTimeout(() => {
-      next.forEach((n) => { api.saveNote(n).catch(() => {}); });
+      if ((api.getCurrentUser()?.user_id || "local") !== originUser) return;
+      if (localStorage.getItem("priva_token") !== originToken) return;
+      const payload: NoteResult = {
+        id: changed.id,
+        title: changed.title,
+        blocks: changed.blocks.filter((block) => block.type !== "drawing"),
+        tags: changed.tags,
+        created_at: changed.created_at,
+        updated_at: changed.updated_at,
+      };
+      api.saveNote(payload)
+        .then(() => api.analyzeNotes(changed.id))
+        .then((nextAnalysis) => {
+          if ((api.getCurrentUser()?.user_id || "local") !== originUser) return;
+          setNotes((current) => {
+            const updated = current.map((note) => note.id === changed.id
+              ? { ...note, analysis: nextAnalysis as unknown as NoteAnalysis }
+              : note);
+            saveNotes(updated);
+            return updated;
+          });
+        })
+        .catch(() => {});
     }, 2000);
+  }, []);
+
+  useEffect(() => () => {
+    if (syncTimer.current) clearTimeout(syncTimer.current);
   }, []);
 
   useEffect(() => {
     api.getNotes().then(({ notes }) => {
       setNotes((prev) => {
-        if (prev.length === 0 && notes.length > 0) return notes as StoredNote[];
-        return prev;
+        const merged = new Map<string, StoredNote>();
+        for (const remote of notes as StoredNote[]) merged.set(remote.id, remote);
+        for (const local of prev) {
+          const remote = merged.get(local.id);
+          if (!remote || normalizedTime(local.updated_at) >= normalizedTime(remote.updated_at)) {
+            merged.set(local.id, local);
+          }
+        }
+        const next = Array.from(merged.values()).sort((a, b) => normalizedTime(b.updated_at) - normalizedTime(a.updated_at));
+        saveNotes(next);
+        return next;
       });
       if (notes.length > 0 && notes[0].id) setActiveNoteId((cur) => cur ?? notes[0].id);
     }).catch(() => {});
@@ -383,10 +436,10 @@ export function NotesWorld() {
       setNotes((prev) => prev.map((n) => {
         const a = list.find((x) => x.id === n.id);
         if (!a) return n;
-        return { ...n, analysis: { buy_intents: (a.buy_intents ?? []) as NoteAnalysis["buy_intents"], todos: a.todos ?? [], reminders: [], category: a.category ?? "general", summary: a.summary ?? "" } };
+        return { ...n, analysis: { buy_intents: (a.buy_intents ?? []) as NoteAnalysis["buy_intents"], todos: a.todos ?? [], reminders: (a as { reminders?: NoteAnalysis["reminders"] }).reminders ?? [], category: a.category ?? "general", summary: a.summary ?? "" } };
       }));
     }).catch(() => {});
-  }, [notes.length > 0 && notes[0]?.updated_at, activeNoteId]);
+  }, [notes.length]);
 
   const activeNote = notes.find((n) => n.id === activeNoteId) || null;
 
@@ -400,14 +453,14 @@ export function NotesWorld() {
       updated_at: Date.now(),
     };
     setNotes((prev) => [note, ...prev]);
-    pushToBackend([note, ...notes]);
+    pushToBackend([note, ...notes], note);
     setActiveNoteId(note.id);
   }, [notes, pushToBackend]);
 
   const updateNote = (updated: StoredNote) => {
     const next = notes.map((n) => n.id === updated.id ? updated : n);
     setNotes(next);
-    pushToBackend(next);
+    pushToBackend(next, updated);
   };
 
   const deleteNote = (id: string) => {
@@ -422,7 +475,12 @@ export function NotesWorld() {
     if (!activeNote) return;
     const now = Date.now();
     let due = now + mins * 60 * 1000;
-    if (mins === -1) due = new Date(now).setHours(21, 0, 0, 0);
+    if (mins === -1) {
+      const tonight = new Date(now);
+      tonight.setHours(21, 0, 0, 0);
+      if (tonight.getTime() <= now) tonight.setDate(tonight.getDate() + 1);
+      due = tonight.getTime();
+    }
     if (mins === -2) due = new Date(now + 86400000).setHours(9, 0, 0, 0);
     const text = customText || (activeNote.title || "Note") + ` (${label})`;
     api.addReminder(text, Math.floor(due / 1000), activeNote.id).then(({ reminder }) => {

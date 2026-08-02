@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { MessageSquareText, Phone, User, KeyRound, LogIn } from "lucide-react";
 import { api } from "../engine/apiClient";
+import { Logo } from "./Logo";
 
 export function LoginScreen({ onLogin }: { onLogin: () => void }) {
   const [step, setStep] = useState<"phone" | "otp">("phone");
@@ -41,23 +42,18 @@ export function LoginScreen({ onLogin }: { onLogin: () => void }) {
   };
 
   return (
-    <div className="h-screen w-screen flex flex-col items-center justify-center bg-canvas relative overflow-hidden">
+    <div className="flex-1 w-full flex flex-col items-center justify-center bg-canvas relative overflow-hidden">
       <div className="absolute inset-0 pointer-events-none opacity-60"
         style={{
           background:
-            "radial-gradient(600px 300px at 50% 0%, rgba(139,92,246,0.14), transparent), radial-gradient(500px 260px at 80% 100%, rgba(34,211,238,0.10), transparent)",
+            "radial-gradient(600px 300px at 50% 0%, rgba(212,175,55,0.12), transparent), radial-gradient(500px 260px at 80% 100%, rgba(183,110,121,0.08), transparent)",
         }}
       />
 
       <div className="relative w-[380px] max-w-[92vw]">
-        <div className="flex items-center gap-3 mb-8 justify-center">
-          <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-accent to-accent-bright flex items-center justify-center text-white font-black text-xl shadow-[0_0_24px_rgba(139,92,246,0.45)]">
-            P
-          </div>
-          <div>
-            <div className="text-lg font-bold text-text-primary tracking-tight">PRIVA</div>
-            <div className="text-[10px] text-text-muted uppercase tracking-widest">Personal Retail Intelligence</div>
-          </div>
+        <div className="flex flex-col items-center gap-3 mb-8 justify-center">
+          <Logo size="large" />
+          <div className="text-[10px] text-text-muted uppercase tracking-widest">Personal Retail Intelligence</div>
         </div>
 
         <div className="bg-surface-2 border border-border rounded-2xl p-6 space-y-4">

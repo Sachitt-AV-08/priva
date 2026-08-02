@@ -17,15 +17,36 @@ function getDevUrl() {
 }
 
 function isDev() {
-  const distPath = path.join(__dirname, "../dist/index.html");
-  return !fs.existsSync(distPath);
+  return !app.isPackaged;
+}
+
+function safeExternalUrl(value: string): string | null {
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" ? url.toString() : null;
+  } catch {
+    return null;
+  }
 }
 
 function saveDb() {
   if (!db) return;
   const data = db.export();
   const buffer = Buffer.from(data);
-  fs.writeFileSync(DB_PATH, buffer);
+  const tempPath = `${DB_PATH}.tmp`;
+  let descriptor: number | null = null;
+  try {
+    descriptor = fs.openSync(tempPath, "w");
+    fs.writeFileSync(descriptor, buffer);
+    fs.fsyncSync(descriptor);
+    fs.closeSync(descriptor);
+    descriptor = null;
+    fs.renameSync(tempPath, DB_PATH);
+  } catch (error) {
+    if (descriptor !== null) fs.closeSync(descriptor);
+    try { fs.unlinkSync(tempPath); } catch { /* noop */ }
+    console.error("[main] database save failed:", error);
+  }
 }
 
 function runQuery(sql: string, params: any[] = []): any[] {
@@ -149,23 +170,30 @@ function createWindow() {
   const { width, height } = screen.getPrimaryDisplay().workAreaSize;
 
   mainWindow = new BrowserWindow({
-    width: Math.min(1280, width),
-    height: Math.min(800, height),
+    width: Math.min(1440, width),
+    height: Math.min(900, height),
     frame: false,
     titleBarStyle: "hidden",
-    backgroundColor: "#08090a",
+    backgroundColor: "#090909",
     webPreferences: {
       preload: getPreloadPath(),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
+      zoomFactor: 1.12,
     },
     show: false,
   });
 
   // Voice shopping: allow mic + audio capture without a permission prompt.
   mainWindow.webContents.session.setPermissionRequestHandler((_wc, permission, callback) => {
-    callback(permission === "media" || permission === "microphone" || permission === "audioCapture");
+    callback(permission === "media");
+  });
+
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    const external = safeExternalUrl(url);
+    if (external) void shell.openExternal(external);
+    return { action: "deny" };
   });
 
   // If the renderer dies natively (e.g. an audio-stack edge case), the window
@@ -257,7 +285,11 @@ function registerIPC() {
     return result.canceled ? null : result.filePath;
   });
 
-  ipcMain.handle("shell:openExternal", (_event, url: string) => shell.openExternal(url));
+  ipcMain.handle("shell:openExternal", (_event, url: string) => {
+    const external = safeExternalUrl(url);
+    if (!external) throw new Error("Only secure external URLs are allowed");
+    return shell.openExternal(external);
+  });
 
   ipcMain.handle("app:getVersion", () => app.getVersion());
   ipcMain.handle("app:getPath", (_event, name: string) => app.getPath(name as any));
