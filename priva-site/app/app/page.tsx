@@ -26,7 +26,11 @@ function AppInner() {
   return (
     <main className="site">
       <nav className="nav">
-        <div className="logo"><span className="logo-mark">P</span><span>PRIVA</span></div>
+        <a className="logo" href="/">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/priva.png" alt="PRIVA" />
+          <span>PRIVA</span>
+        </a>
         <div className="nav-links">
           <Link href="/">Home</Link>
           <Link href="/login">Log in</Link>

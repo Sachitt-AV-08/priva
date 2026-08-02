@@ -4,52 +4,53 @@ import { DOWNLOAD_URL, GITHUB_URL, WEB_APP_URL } from "../lib/constants";
 const FEATURES = [
   {
     icon: "🧠",
-    title: "An agent that closes the loop",
-    desc: "Notes → buy intent → preference question → deep search → ranked picks → consent → checkout → tracking. PRIVA drives the whole purchase; you just answer texts.",
+    title: "Your notes become offers",
+    desc: "Save it like you always do: “usb-c hub for travel, under 300.” PRIVA texts you a preference question, then ranked picks inside your budget.",
   },
   {
     icon: "💬",
-    title: "Real SMS, real iMessage",
-    desc: "Linq webhook with HMAC-verified signatures. PRIVA texts you offers, preference questions, and reminders on your actual phone — no app needed.",
+    title: "SMS on your real phone",
+    desc: "No app required. PRIVA texts you through Linq on the same thread your phone already uses — the conversation mirrors to the web and desktop apps.",
   },
   {
     icon: "🎯",
-    title: "Quality-first, budget-aware",
-    desc: "Deep SerpApi search with budget-band spec matching, entry/premium token ranking, merchant trust, and a hard budget cap. No budget blowouts.",
+    title: "Budget is a hard line",
+    desc: "Deep SerpApi search with budget-band matching, merchant trust, and a strict cap. Nothing over budget ships without your explicit consent.",
   },
   {
     icon: "💳",
-    title: "Checkout on Prava (Visa)",
-    desc: "One-tap checkout sessions via Prava / Visa Intelligent Commerce sandbox, with budget-excess detection before you pay.",
+    title: "Pay in one tap",
+    desc: "Prava (Visa Intelligent Commerce) sandbox checkout sessions with budget-excess detection before you pay.",
   },
   {
     icon: "🛍️",
-    title: "Proactive follow-ups",
-    desc: "Price-drop watchlist alerts, reminders from natural-language times, and urgent-offer pacing when a note says ASAP.",
+    title: "It follows up",
+    desc: "Price-drop watch alerts, reminders from natural-language times (“remind me Friday”), and urgent-offer pacing when you say ASAP.",
   },
   {
     icon: "📊",
-    title: "Your spending, understood",
-    desc: "Monthly caps, borrowed-into-next-month, spend by merchant and day — visualized in a live purchase graph.",
+    title: "Your money, tracked",
+    desc: "Monthly caps, borrow-into-next-month, and spend by merchant — in a live purchase graph.",
   },
 ];
 
 const STEPS = [
   ["Type a note", "“need a usb-c hub for travel, under 300” — the kind of note you already keep."],
-  ["Get texted", "PRIVA texts a preference question to your phone via Linq SMS."],
-  ["Answer", "“black, 8-in-1” — preferences are extracted and remembered."],
+  ["PRIVA texts you", "A preference question lands on your phone via Linq SMS."],
+  ["You answer", "“black, 8-in-1” — preferences are extracted and remembered."],
   ["Pick a winner", "Deep search returns budget-capped, quality-ranked options with a best pick."],
-  ["Pay & track", "Prava sandbox checkout, budget accounting, and shipping progress."],
+  ["Pay & track", "Prava sandbox checkout, budget accounting, shipping progress."],
 ];
 
 export default function Page() {
   return (
     <main className="site">
       <nav className="nav">
-        <div className="logo">
-          <span className="logo-mark">P</span>
+        <a className="logo" href="/">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/priva.png" alt="PRIVA" />
           <span>PRIVA</span>
-        </div>
+        </a>
         <div className="nav-links">
           <a href="#demo">Live demo</a>
           <a href="#how">How it works</a>
@@ -60,20 +61,19 @@ export default function Page() {
       </nav>
 
       <header className="hero">
-        <p className="badge">Agentic Commerce Hackathon · 2nd place · Visa / Linq / SerpApi</p>
         <h1>
-          Your notes, turned into
+          Where Notes
           <br />
-          <span className="grad">your best buys.</span>
+          becomes <span className="gold">Purchase</span>
         </h1>
         <p className="hero-sub">
           PRIVA reads the notes you already keep, finds the best options inside your budget,
-          pays with <b>Prava</b>, and texts you the whole time on <b>Linq SMS</b>.
+          pays with <b>Prava</b>, and texts you the whole way on <b>Linq SMS</b>.
         </p>
         <div className="hero-cta">
           <a className="btn primary" href="#demo">Try the live demo</a>
           <a className="btn" href={DOWNLOAD_URL}>Download installer</a>
-          <a className="btn ghost" href={WEB_APP_URL} target="_blank" rel="noreferrer">Open full web app</a>
+          <a className="btn ghost" href={WEB_APP_URL} target="_blank" rel="noreferrer">Open the app</a>
         </div>
       </header>
 
@@ -83,7 +83,7 @@ export default function Page() {
       </section>
 
       <section className="section">
-        <h2>Why it&apos;s an <span className="grad">agent</span>, not a chatbot</h2>
+        <h2>An <span className="gold">agent</span>, not a chatbot</h2>
         <div className="grid">
           {FEATURES.map((f) => (
             <div className="card" key={f.title}>
@@ -111,14 +111,14 @@ export default function Page() {
       <section id="install" className="section install">
         <h2>Get PRIVA on your desktop</h2>
         <p>
-          Windows portable installer — the full app: commerce chat, notes, purchase graph, tasks.
-          No setup. Point it at your own backend or the live demo backend.
+          Windows installer — the full app: chat, notes, purchase graph, tasks.
+          No setup, no account required.
         </p>
         <div className="hero-cta center">
           <a className="btn primary big" href={DOWNLOAD_URL}>⬇ Download PRIVA 1.0.0 (.exe)</a>
         </div>
         <p className="dim small">
-          Built with Electron · React · TypeScript · FastAPI — see the source on{" "}
+          Electron · React · TypeScript · FastAPI — source on{" "}
           <a href={GITHUB_URL} target="_blank" rel="noreferrer">GitHub</a>
         </p>
       </section>
@@ -128,7 +128,7 @@ export default function Page() {
           PRIVA — Personal Retail Intelligence via Agent.
           Built with <b>Prava (Visa Intelligent Commerce)</b>, <b>Linq</b>, and <b>SerpApi</b>.
         </p>
-        <p className="dim small">149 backend tests · multi-user web demo · phone + OTP login</p>
+        <p className="dim small">151 backend tests · multi-user web demo · phone + OTP login</p>
       </footer>
     </main>
   );

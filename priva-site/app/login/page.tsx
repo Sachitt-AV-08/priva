@@ -63,7 +63,11 @@ function LoginInner() {
   return (
     <main className="site">
       <nav className="nav">
-        <div className="logo"><span className="logo-mark">P</span><span>PRIVA</span></div>
+        <a className="logo" href="/">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/priva.png" alt="PRIVA" />
+          <span>PRIVA</span>
+        </a>
         <div className="nav-links">
           <Link href="/">Home</Link>
           <Link href="/login" className="on">Log in</Link>
@@ -72,10 +76,10 @@ function LoginInner() {
 
       <section className="login-wrap">
         <div className="card login-card">
-          <h2>Welcome to PRIVA</h2>
+          <h2>Where Notes becomes Purchase</h2>
           <p className="dim small">
             Sign up with your phone — PRIVA texts you on real SMS via Linq, and this same
-            conversation shows up on your desktop app.
+            conversation shows up in the desktop app.
           </p>
 
           {step === "phone" ? (

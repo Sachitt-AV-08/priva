@@ -40,36 +40,34 @@ export default function DashboardPage() {
 
   return (
     <AppShell>
-      <section className="section">
-        <div className="page-head">
-          <h2>Dashboard</h2>
-          <Link className="btn primary" href="/notes/new">+ New note</Link>
-        </div>
+      <div className="page-head">
+        <h2>Chat</h2>
+        <Link className="btn primary" href="/notes/new">+ New note</Link>
+      </div>
 
-        <div className="grid two">
-          <div className="card">
-            <h3>📝 Your notes</h3>
-            {notes.length === 0 && <p className="dim small">No notes yet — PRIVA turns them into offers texted to your phone.</p>}
-            {notes.map((n) => (
-              <div className="note-row" key={n.id}>
-                <b>{n.title || "Untitled"}</b>
-                <p className="dim small">{text(n).slice(0, 140) || "—"}</p>
-                <span className="dim tiny">
-                  {new Date((n.created_at || 0) * 1000).toLocaleDateString()}
-                </span>
-              </div>
-            ))}
-          </div>
-          <div className="card">
-            <h3>📦 Recent orders</h3>
-            <Orders />
-          </div>
-        </div>
+      <div className="card">
+        <Chat />
+      </div>
 
+      <div className="grid two" style={{ marginTop: 18 }}>
         <div className="card">
-          <Chat />
+          <h3>📝 Your notes</h3>
+          {notes.length === 0 && <p className="dim small">No notes yet — PRIVA turns them into offers texted to your phone.</p>}
+          {notes.map((n) => (
+            <div className="note-row" key={n.id}>
+              <b>{n.title || "Untitled"}</b>
+              <p className="dim small">{text(n).slice(0, 140) || "—"}</p>
+              <span className="dim tiny">
+                {new Date((n.created_at || 0) * 1000).toLocaleDateString()}
+              </span>
+            </div>
+          ))}
         </div>
-      </section>
+        <div className="card">
+          <h3>📦 Recent orders</h3>
+          <Orders />
+        </div>
+      </div>
     </AppShell>
   );
 }
