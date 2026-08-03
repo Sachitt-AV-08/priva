@@ -525,27 +525,20 @@ class LinqSendIn(BaseModel):
 
 @app.post("/api/linq/send")
 async def api_linq_send(req: LinqSendIn, user: dict = Depends(current_user)):
-    """Send an SMS from the web/desktop chat (real phone delivery via Linq)."""
+    """Send an SMS from the web/desktop chat (real phone delivery via Linq).
+
+    The user's text is treated as an INBOUND message and routed through the
+    same conversation machine as a phone reply, so PRIVA always answers
+    (canned help for casual messages, full flow for shopping intents).
+    """
     to = user_phone(user)
     if not to:
         raise HTTPException(status_code=400, detail="No SMS destination configured")
     thread_id = user_thread(user) if user["user_id"] != "local" else (req.thread_id or "priva_mirror")
-    result = await send_message(to, req.text, thread_id)
-    error = result.get("error") if isinstance(result, dict) else None
-    if error and DEMO_MODE:
-        # Demo sandbox: rewrite the direction — the user's text is INBOUND
-        # ("you → PRIVA") and PRIVA acks OUTBOUND so the chat reads correctly
-        # even when the phone number isn't a real Linq recipient.
-        pop_outbound(req.text, thread_id)
-        record_inbound(to, req.text, thread_id)
-        await send_message(
-            to,
-            "Got it. What are you looking for? Save a note and I'll find the best buy inside your budget.",
-            thread_id,
-        )
-        return {"ok": True, "sent": True, "demo": True, "thread_id": thread_id}
+    from_ = to or "priva_user"
+    result = await route_inbound(from_, req.text, thread_id)
     emit_activity("LINQ", "web chat -> SMS", req.text[:60])
-    return {"ok": True, "sent": not error, "error": error, "thread_id": thread_id}
+    return {"ok": True, "sent": True, "result": result, "thread_id": thread_id}
 
 
 @app.delete("/api/linq/transcript")

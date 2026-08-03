@@ -51,12 +51,45 @@ def _parse_price_hint(text: str) -> Optional[float]:
     return float(m.group(1)) if m else None
 
 
-def _extract_buy_intents(text: str) -> list:
+_SHOP_TITLE_RE = re.compile(r"\b(shopping|grocery|groc? list|buy(?:ing)? list|to\s*buy|purchases?|wishlist|shopping list)\b", re.I)
+# verbs that signal an action line (todo), not a bare shopping item
+_BARE_ITEM_SKIP_VERBS = re.compile(
+    r"\b(call|email|text|message|submit|finish|complete|pay|renew|cancel|book|schedule|"
+    r"take|fix|clean|prepare|write|download|install|register|file|return|meet|send|"
+    r"check|review|follow up|confirm|reserve|collect|drop off|apply|cook|make|buy|get|"
+    r"order|pick|look|need|want|find|visit|read|watch|study)\b",
+    re.I,
+)
+
+
+def _looks_like_bare_item(line: str) -> bool:
+    """A short noun-phrase line with no action verbs, e.g. 'soccer ball' / 'vase'."""
+    words = line.split()
+    if not 1 <= len(words) <= 8:
+        return False
+    if not any(ch.isalnum() for ch in line):
+        return False
+    if re.search(r"\d{1,2}:\d{2}|am\b|pm\b|tomorrow|tonight|now\b", line, re.I):
+        return False
+    if _BARE_ITEM_SKIP_VERBS.search(line):
+        return False
+    # sentence with more than one clause / trailing action phrasing
+    if re.search(r"\b(and|but|so|because|before|by|until)\b.*\b(v|go|do|buy|pay|call|send|make)\b", line, re.I):
+        return False
+    return True
+
+
+def _extract_buy_intents(text: str, title: str = "") -> list:
+    title_signal = bool(_SHOP_TITLE_RE.search(title or ""))
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    # The title itself is a shopping signal, never a shopping item.
+    title_line = (title or "").strip()
+    bare_lines = [ln for ln in lines if ln != title_line and _looks_like_bare_item(ln)]
+    # A bare item is a buy intent when the title is shopping-flavoured, or the
+    # note is mostly bare items (>=2), i.e. an implicit shopping list.
+    implicit_list = title_signal or len(bare_lines) >= 2
     intents = []
-    for line in text.splitlines():
-        line = line.strip()
-        if not line:
-            continue
+    for line in lines:
         if re.match(_IGNORE_PREFIX, line, re.I):
             continue
         # todo-prefixed lines are todos, not buys
@@ -70,13 +103,16 @@ def _extract_buy_intents(text: str) -> list:
             r"out of|low on|need (?:a|an|the|new)?|restock)(.+)$",
             line, re.I,
         )
-        if not m:
-            continue
-        item = m.group(1).strip(" .:;-–")
-        # strip trailing clauses
-        item = re.split(r"\s+(?:under|less than|before|by|for\s+\$\d|since)\b", item, flags=re.I)[0].strip()
-        item = re.sub(r"^(?:a|an|the)\s+", "", item, flags=re.I)
-        item = re.sub(r"\s+", " ", item)
+        item = ""
+        raw = line
+        if m:
+            item = m.group(1).strip(" .:;–-")
+        elif implicit_list and line in bare_lines:
+            item = line
+        if item:
+            item = re.split(r"\s+(?:under|less than|before|by|for\s+\$\d|since)\b", item, flags=re.I)[0].strip()
+            item = re.sub(r"^(?:a|an|the)\s+", "", item, flags=re.I)
+            item = re.sub(r"\s+", " ", item)
         if not item or len(item) > 60:
             continue
         if not any(ch.isalnum() for ch in item):
@@ -87,7 +123,7 @@ def _extract_buy_intents(text: str) -> list:
             "item": item,
             "price_hint": _parse_price_hint(line),
             "prefs": extract_preferences(line),
-            "raw": line,
+            "raw": raw,
         })
     # dedupe by item
     seen, unique = set(), []
@@ -218,7 +254,7 @@ def analyze_note(note: dict) -> dict:
     title = str(note.get("title", ""))
     blocks = note.get("blocks", [])
     text = _note_text(title, blocks)
-    buy_intents = _extract_buy_intents(text)
+    buy_intents = _extract_buy_intents(text, title)
     todos = _extract_todos(text, buy_intents)
     reminders = _extract_reminders(text)
     category = _categorize(text, buy_intents, todos)
@@ -250,6 +286,9 @@ async def analyze_note_llm(note: dict) -> dict:
                     '{"buy_intents":[{"item","price_hint","raw"}],"todos":[str],'
                     '"reminders":[{"text","due_at","parsed_from"}],"category":"shopping|work|personal|health|general",'
                     '"summary":"one line"}'
+                    " If the note is a shopping list (even bare item names like "
+                    "'soccer ball', 'vase', 'soap' with no buy verbs, or a title like "
+                    "'Shopping list'), return EACH item as a buy_intent."
                 )},
                 {"role": "user", "content": str(note)},
             ],

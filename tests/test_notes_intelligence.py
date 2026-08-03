@@ -33,6 +33,23 @@ def test_buy_intent_with_price_hint():
     assert a["category"] == "shopping"
 
 
+def test_shopping_list_note_with_bare_items():
+    a = analyze_note(_note("Shopping list", ["soccer ball", "vase", "soap"]))
+    items = {it["item"] for it in a["buy_intents"]}
+    assert items == {"soccer ball", "vase", "soap"}
+    assert a["category"] == "shopping"
+
+
+def test_single_bare_item_in_shopping_titled_note():
+    a = analyze_note(_note("Shopping", ["soccer ball"]))
+    assert [it["item"] for it in a["buy_intents"]] == ["soccer ball"]
+
+
+def test_work_note_gets_no_buy_intents():
+    a = analyze_note(_note("Work", ["finish report by friday", "call dentist at 5pm"]))
+    assert a["buy_intents"] == []
+
+
 def test_want_and_out_of_patterns():
     a = analyze_note(_note("Groceries", ["out of milk and eggs", "want new running shoes"]))
     items = {it["item"] for it in a["buy_intents"]}

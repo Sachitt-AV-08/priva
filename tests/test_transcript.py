@@ -68,3 +68,22 @@ def test_transcript_endpoint_returns_both_lists(tmp_path, monkeypatch):
         assert all(m["thread_id"] == "trx_t1" for m in body["inbound"])
         assert "messages" in body  # outbound list preserved for compatibility
     srv.conversations.pop("trx_t1", None)
+
+
+def test_web_chat_send_gets_casual_reply(tmp_path, monkeypatch):
+    """'Hey, what can you do?' via the web chat must get a PRIVA reply, not silence."""
+    monkeypatch.setattr(linq_client, "_TRANSCRIPT_FILE", str(tmp_path / "transcript.json"))
+    import server as srv
+
+    async def fake_send_message(to, text, thread_id=""):
+        linq_client._record(to, text, thread_id)
+        return {"ok": True, "demo": True}
+
+    monkeypatch.setattr(srv, "send_message", fake_send_message)
+    # no active conversation -> unknown intent -> canned help reply
+    with TestClient(srv.app) as client:
+        r = client.post("/api/linq/send", json={"text": "Hey, what can you do?", "thread_id": "chat1"})
+        assert r.status_code == 200
+        body = r.json()
+        assert body.get("ok") is True
+    srv.conversations.pop("chat1", None)

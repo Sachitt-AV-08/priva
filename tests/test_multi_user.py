@@ -116,7 +116,9 @@ def test_transcript_endpoint_scoped_to_user():
     bob = _register(client, "+19170000002", "Bob")
     client.post("/api/linq/send", json={"text": "hello from web"}, headers=_auth(alice["token"]))
     alice_transcript = client.get("/api/linq/transcript", headers=_auth(alice["token"])).json()
-    assert any("hello from web" in m["text"] for m in alice_transcript["messages"])
+    # user's web-chat text is INBOUND; PRIVA's reply is OUTBOUND
+    assert any("hello from web" in m["text"] for m in alice_transcript["inbound"])
+    assert any("help you shop" in m["text"] for m in alice_transcript["messages"])
     bob_transcript = client.get("/api/linq/transcript", headers=_auth(bob["token"])).json()
     assert bob_transcript["messages"] == []
     assert bob_transcript["inbound"] == []
